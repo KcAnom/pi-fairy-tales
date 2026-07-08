@@ -1,0 +1,45 @@
+# pi-fable
+
+A Fable-class harness for the [pi coding agent](https://github.com/earendil-works/pi-mono): subagent orchestration, persistent memory, plan mode, guard-rail hooks, todo tracking, smart compaction, a live status line, and web fetch — as one local pi package.
+
+## Install
+
+```bash
+pi install ~/pi-fable
+```
+
+Local packages load in place: edit any file here and `/reload` inside pi picks it up. Remove with `pi remove ~/pi-fable`.
+
+## What you get
+
+| Piece | What it does |
+|---|---|
+| `agent` tool | Delegate to role-specialized subagents: **explore** (read-only scout), **plan** (architect), **build** (implements + verifies), **review** (defect finder), **general**. Multiple `agent` calls in one assistant message run in parallel. `background: true` runs detached and delivers the result when done. Turn/cost/concurrency caps enforced. |
+| `agent_control` tool + `/agents` | List, fetch results, or abort runs. Live widget above the editor while agents run. |
+| Memory | `~/.pi/agent/memory/MEMORY.md` index injected each session; `remember` tool saves facts (optionally into `topics/*.md`); `/memory` edits the index. |
+| Plan mode | `/plan`, `--plan` flag, or `ctrl+alt+p`. Read-only until the agent presents its plan via `exit_plan` and you approve; approved plans are saved to `~/.pi/agent/plans/`. Survives restarts. |
+| Hooks | Config-driven guard rails: bash regex rules and path glob rules (`block` / `confirm`, confirm fail-safes to block headless). Post-edit hook runs `<project>/.pi/test-command` after file edits and steers failures back to the agent to self-fix. Active inside subagents too. |
+| `todo` tool | Checklist for multi-step tasks, widget above the editor, state survives restart/fork (rebuilt from the session branch). |
+| Smart compaction | `/compact` and auto-compaction produce a structured handoff summary (Request & Intent / Key Decisions / Files & State / Done / Pending). Falls back to pi's default on any error. |
+| Status line | `model · ctx N% · $cost · ⚡running agents` in the footer. |
+| `fetch` tool | URL → readable text (HTML stripped), 20s timeout, 50KB cap. |
+| Skills | `deep-review` (parallel multi-agent review with verification), `handoff` (session handoff doc), `ship` (verify → commit → report). |
+| Prompts | `/commit`, `/review`, `/plan-task`, `/standup` — see `prompts/`. |
+
+## Configuration
+
+Defaults ship in [`fable.config.json`](fable.config.json). Override globally in `~/.pi/agent/fable.json` or per project in `<project>/.pi/fable.json` (deep-merged, project wins). Key sections:
+
+- `tiers` — model per tier (`provider/model-id` + thinkingLevel). Default: all tiers on `openai-codex/gpt-5.4-mini` with low/medium/high thinking. Point `scout`/`brain` at cheaper/stronger models when available (e.g. deepseek — needs account balance).
+- `agents` — `maxConcurrent`, `maxTurnsPerRun`, `maxCostPerRunUsd`, and the role definitions (tier, tool allowlist, description, `promptAppend`).
+- `hooks.bash` / `hooks.paths` — your guard-rail rules (regex / glob, `block` or `confirm`).
+- `hooks.postEdit` — post-edit test runner (reads `<project>/.pi/test-command`).
+- `memory.dir`, `plans.dir`, `web.*`.
+
+## Design notes
+
+- Subagents run in-process via pi's SDK (`createAgentSession`) with an **empty agentDir + in-memory settings** — installed packages (including pi-fable itself) never load inside subagents, so recursion is structurally impossible. Guard-rail hooks and `fetch` are re-injected explicitly.
+- Cross-extension state flows only over `pi.events` (`src/bus.ts`).
+- All file writes go through `withFileMutationQueue` (parallel-tool safe).
+- Every UI call is behind `ctx.hasUI` — everything works in `-p`, JSON, and RPC modes; confirm-gated rules fail safe to block.
+- Background runs do not survive `/reload` or session switches (documented pi limitation); they are aborted on `session_shutdown`.
