@@ -44,3 +44,19 @@ Defaults ship in [`fairy-tales.config.json`](fairy-tales.config.json). Override 
 - All file writes go through `withFileMutationQueue` (parallel-tool safe).
 - Every UI call is behind `ctx.hasUI` — everything works in `-p`, JSON, and RPC modes; confirm-gated rules fail safe to block.
 - Background runs do not survive `/reload` or session switches (documented pi limitation); they are aborted on `session_shutdown`.
+
+## `ftales` — the branded launcher
+
+`ftales` (a tiny wrapper installed next to the `pi` binary) launches the same pi with the **Fairy Tales experience** turned on:
+
+- the `fairy-tales` theme (twilight purple / fairy-dust gold, ships in `themes/`)
+- a "✧ F A I R Y  T A L E S ✧ — once upon a terminal" startup header
+- terminal title `✦ Fairy Tales — <project>`
+- a drifting-sparkle working indicator
+
+Plain `pi` stays completely unbranded. pi persists theme switches to settings.json, so the brand extension records your previous theme in `~/.pi/agent/fairy-tales.json` when `ftales` starts, and the next plain `pi` session automatically switches back. All other harness features (subagents, memory, hooks…) are identical in both.
+
+The launcher is just `FTALES=1 exec pi "$@"` — recreate it anywhere with:
+```bash
+printf '#!/bin/sh\nexport FTALES=1\nexec pi "$@"\n' > "$(dirname "$(which pi)")/ftales" && chmod +x "$(dirname "$(which pi)")/ftales"
+```
