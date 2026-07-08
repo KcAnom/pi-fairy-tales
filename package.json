@@ -1,7 +1,7 @@
 {
-  "name": "pi-fable",
+  "name": "pi-fairy-tales",
   "version": "0.1.0",
-  "description": "Fable-class harness for pi: subagents, memory, plan mode, hooks, todos, smart compaction, status line, web fetch",
+  "description": "Fairy-Tales-class harness for pi: subagents, memory, plan mode, hooks, todos, smart compaction, status line, web fetch",
   "private": true,
   "type": "module",
   "keywords": ["pi-package"],

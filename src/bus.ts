@@ -1,12 +1,12 @@
 /**
  * Names and payload types for the pi.events cross-extension bus.
- * All fable extensions communicate ONLY through these events —
+ * All fairy-tales extensions communicate ONLY through these events —
  * module-level state is not guaranteed to be shared across extension files.
  */
 
-export const AGENTS_STATUS = "fable:agents:status";
-export const COST_ADD = "fable:cost:add";
-export const PLAN_CHANGED = "fable:plan:changed";
+export const AGENTS_STATUS = "fairy-tales:agents:status";
+export const COST_ADD = "fairy-tales:cost:add";
+export const PLAN_CHANGED = "fairy-tales:plan:changed";
 
 export interface RunSummary {
   id: string;

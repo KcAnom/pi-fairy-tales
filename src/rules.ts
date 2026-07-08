@@ -1,4 +1,4 @@
-/** Rule evaluation for the fable hook engine. */
+/** Rule evaluation for the fairy-tales hook engine. */
 import type { BashRule, PathRule } from "./config.ts";
 import { pathMatches } from "./glob.ts";
 

@@ -1,4 +1,4 @@
-/** Formatting + truncation helpers shared by fable extensions. */
+/** Formatting + truncation helpers shared by fairy-tales extensions. */
 import { truncateTail, truncateHead } from "@earendil-works/pi-coding-agent";
 
 export function fmtUsd(usd: number): string {

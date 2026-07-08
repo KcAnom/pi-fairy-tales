@@ -1,7 +1,7 @@
 /**
- * fable-plan: plan mode.
+ * fairy-tales-plan: plan mode.
  * Enter via /plan, --plan flag, or ctrl+alt+p. While active:
- * - mutating tools (edit/write) are deactivated; fable-hooks additionally
+ * - mutating tools (edit/write) are deactivated; fairy-tales-hooks additionally
  *   blocks mutating bash and edit/write at the tool_call layer.
  * - the system prompt gets a planning addendum and the agent is told to
  *   finish by calling exit_plan.
@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
-import { loadFableConfig, expandHome, isNested } from "../src/config.ts";
+import { loadFairyTalesConfig, expandHome, isNested } from "../src/config.ts";
 import { PLAN_CHANGED } from "../src/bus.ts";
 import { slugify } from "../src/text.ts";
 
@@ -39,10 +39,10 @@ export default function (pi: ExtensionAPI) {
     active = true;
     savedTools = pi.getActiveTools().map((t: { name: string } | string) => (typeof t === "string" ? t : t.name));
     pi.setActiveTools([...new Set([...savedTools.filter((name) => READONLY_KEEP.has(name)), "exit_plan"])]);
-    pi.appendEntry("fable-plan", { active: true, savedTools });
+    pi.appendEntry("fairy-tales-plan", { active: true, savedTools });
     pi.events.emit(PLAN_CHANGED, { active: true });
     if (ctx.hasUI) {
-      ctx.ui.setStatus("fable-plan", "◆ PLAN");
+      ctx.ui.setStatus("fairy-tales-plan", "◆ PLAN");
       ctx.ui.notify("Plan mode: read-only until exit_plan is accepted", "info");
     }
   };
@@ -52,9 +52,9 @@ export default function (pi: ExtensionAPI) {
     active = false;
     if (savedTools?.length) pi.setActiveTools(savedTools);
     savedTools = undefined;
-    pi.appendEntry("fable-plan", { active: false });
+    pi.appendEntry("fairy-tales-plan", { active: false });
     pi.events.emit(PLAN_CHANGED, { active: false });
-    if (ctx.hasUI) ctx.ui.setStatus("fable-plan", undefined);
+    if (ctx.hasUI) ctx.ui.setStatus("fairy-tales-plan", undefined);
   };
 
   pi.registerFlag("plan", { description: "Start in plan mode", type: "boolean", default: false });
@@ -82,7 +82,7 @@ export default function (pi: ExtensionAPI) {
           content: [{ type: "text", text: "User rejected the plan. Revise it based on their feedback and call exit_plan again." }],
         };
       }
-      const cfg = loadFableConfig(ctx.cwd);
+      const cfg = loadFairyTalesConfig(ctx.cwd);
       const plansDir = expandHome(cfg.plans.dir);
       const date = new Date().toISOString().slice(0, 10);
       const file = join(plansDir, `${date}-${slugify(params.title ?? params.plan.split("\n")[0])}.md`);
@@ -127,7 +127,7 @@ export default function (pi: ExtensionAPI) {
     // Rebuild plan state from the session (restart/resume survival).
     let last: { active?: boolean; savedTools?: string[] } | undefined;
     for (const entry of ctx.sessionManager.getEntries()) {
-      if (entry.type === "custom" && (entry as { customType?: string }).customType === "fable-plan") {
+      if (entry.type === "custom" && (entry as { customType?: string }).customType === "fairy-tales-plan") {
         last = (entry as { data?: { active?: boolean; savedTools?: string[] } }).data;
       }
     }
@@ -139,7 +139,7 @@ export default function (pi: ExtensionAPI) {
       savedTools = last.savedTools;
       pi.setActiveTools([...new Set([...(last.savedTools ?? []).filter((name) => READONLY_KEEP.has(name)), "exit_plan"])]);
       pi.events.emit(PLAN_CHANGED, { active: true });
-      if (ctx.hasUI) ctx.ui.setStatus("fable-plan", "◆ PLAN");
+      if (ctx.hasUI) ctx.ui.setStatus("fairy-tales-plan", "◆ PLAN");
     } else if (event.reason === "startup" && pi.getFlag("plan")) {
       enter(ctx);
     }

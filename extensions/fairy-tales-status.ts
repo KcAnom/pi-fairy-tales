@@ -1,7 +1,7 @@
 /**
- * fable-status: one footer segment with live session vitals.
+ * fairy-tales-status: one footer segment with live session vitals.
  *   <model> · ctx N% · $X.XX · ⚡N agents
- * Cost aggregates main-session assistant messages plus fable:cost:add events
+ * Cost aggregates main-session assistant messages plus fairy-tales:cost:add events
  * emitted by the subagent engine.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -25,7 +25,7 @@ export default function (pi: ExtensionAPI) {
     if (contextPct !== undefined) parts.push(`ctx ${contextPct}%`);
     parts.push(fmtUsd(costUsd));
     if (runningAgents > 0) parts.push(`⚡${runningAgents} agent${runningAgents > 1 ? "s" : ""}`);
-    ctx.ui.setStatus("fable", parts.join(" · "));
+    ctx.ui.setStatus("fairy-tales", parts.join(" · "));
   };
 
   pi.on("session_start", async (_event, ctx) => {

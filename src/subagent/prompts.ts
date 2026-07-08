@@ -1,4 +1,4 @@
-/** System prompt builders for fable subagent roles. */
+/** System prompt builders for fairy-tales subagent roles. */
 import type { RoleConfig } from "../config.ts";
 
 const BASE = `You are a focused subagent inside the pi coding agent. You were spawned by a lead agent to complete one task.

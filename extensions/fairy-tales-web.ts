@@ -1,11 +1,11 @@
 /**
- * fable-web: `fetch` tool — retrieve a URL as readable text (or raw body).
+ * fairy-tales-web: `fetch` tool — retrieve a URL as readable text (or raw body).
  * No dependencies: naive HTML→text conversion, truncated to config maxBytes.
  */
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { loadFableConfig } from "../src/config.ts";
+import { loadFairyTalesConfig } from "../src/config.ts";
 import { clipHead } from "../src/text.ts";
 
 function htmlToText(html: string): string {
@@ -44,7 +44,7 @@ export default function (pi: ExtensionAPI) {
       mode: Type.Optional(StringEnum(["text", "raw"] as const)),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const cfg = loadFableConfig(ctx.cwd);
+      const cfg = loadFairyTalesConfig(ctx.cwd);
       const url = params.url;
       if (!/^https?:\/\//i.test(url)) {
         throw new Error("fetch requires an absolute http(s) URL");
@@ -55,7 +55,7 @@ export default function (pi: ExtensionAPI) {
       const res = await fetch(url, {
         signal: combined,
         redirect: "follow",
-        headers: { "user-agent": "pi-fable/0.1 (+pi coding agent)", accept: "text/html,text/plain,application/json;q=0.9,*/*;q=0.8" },
+        headers: { "user-agent": "pi-fairy-tales/0.1 (+pi coding agent)", accept: "text/html,text/plain,application/json;q=0.9,*/*;q=0.8" },
       });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status} ${res.statusText} for ${url}`);

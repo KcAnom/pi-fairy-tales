@@ -1,14 +1,14 @@
-# pi-fable
+# pi-fairy-tales
 
-A Fable-class harness for the [pi coding agent](https://github.com/earendil-works/pi-mono): subagent orchestration, persistent memory, plan mode, guard-rail hooks, todo tracking, smart compaction, a live status line, and web fetch — as one local pi package.
+A Fairy-Tales-class harness for the [pi coding agent](https://github.com/earendil-works/pi-mono): subagent orchestration, persistent memory, plan mode, guard-rail hooks, todo tracking, smart compaction, a live status line, and web fetch — as one local pi package.
 
 ## Install
 
 ```bash
-pi install ~/pi-fable
+pi install ~/pi-fairy-tales
 ```
 
-Local packages load in place: edit any file here and `/reload` inside pi picks it up. Remove with `pi remove ~/pi-fable`.
+Local packages load in place: edit any file here and `/reload` inside pi picks it up. Remove with `pi remove ~/pi-fairy-tales`.
 
 ## What you get
 
@@ -28,7 +28,7 @@ Local packages load in place: edit any file here and `/reload` inside pi picks i
 
 ## Configuration
 
-Defaults ship in [`fable.config.json`](fable.config.json). Override globally in `~/.pi/agent/fable.json` or per project in `<project>/.pi/fable.json` (deep-merged, project wins). Key sections:
+Defaults ship in [`fairy-tales.config.json`](fairy-tales.config.json). Override globally in `~/.pi/agent/fairy-tales.json` or per project in `<project>/.pi/fairy-tales.json` (deep-merged, project wins). Key sections:
 
 - `tiers` — model per tier (`provider/model-id` + thinkingLevel). Default: all tiers on `openai-codex/gpt-5.4-mini` with low/medium/high thinking. Point `scout`/`brain` at cheaper/stronger models when available (e.g. deepseek — needs account balance).
 - `agents` — `maxConcurrent`, `maxTurnsPerRun`, `maxCostPerRunUsd`, and the role definitions (tier, tool allowlist, description, `promptAppend`).
@@ -38,7 +38,7 @@ Defaults ship in [`fable.config.json`](fable.config.json). Override globally in 
 
 ## Design notes
 
-- Subagents run in-process via pi's SDK (`createAgentSession`) with an **empty agentDir + in-memory settings** — installed packages (including pi-fable itself) never load inside subagents, so recursion is structurally impossible. Guard-rail hooks and `fetch` are re-injected explicitly.
+- Subagents run in-process via pi's SDK (`createAgentSession`) with an **empty agentDir + in-memory settings** — installed packages (including pi-fairy-tales itself) never load inside subagents, so recursion is structurally impossible. Guard-rail hooks and `fetch` are re-injected explicitly.
 - Cross-extension state flows only over `pi.events` (`src/bus.ts`).
 - All file writes go through `withFileMutationQueue` (parallel-tool safe).
 - Every UI call is behind `ctx.hasUI` — everything works in `-p`, JSON, and RPC modes; confirm-gated rules fail safe to block.

@@ -3,7 +3,7 @@
  *
  * Isolation: each subagent gets a DefaultResourceLoader pointed at an EMPTY
  * agentDir with in-memory settings — no installed packages or global
- * extensions load inside subagents, so pi-fable can never recurse into
+ * extensions load inside subagents, so pi-fairy-tales can never recurse into
  * itself. Guard rails and the fetch tool are re-injected explicitly via
  * extensionFactories. Role tool allowlists never include the agent tools.
  */
@@ -16,14 +16,14 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import type { FableConfig, RoleConfig } from "../config.ts";
+import type { FairyTalesConfig, RoleConfig } from "../config.ts";
 import { resolveTierModel } from "../config.ts";
 import type { RunSummary } from "../bus.ts";
 import { buildRolePrompt, composeTask } from "./prompts.ts";
 import { clipTail, fmtDuration, fmtTokens, fmtUsd } from "../text.ts";
 
-import hooksExtension from "../../extensions/fable-hooks.ts";
-import webExtension from "../../extensions/fable-web.ts";
+import hooksExtension from "../../extensions/fairy-tales-hooks.ts";
+import webExtension from "../../extensions/fairy-tales-web.ts";
 
 export interface RunResult {
   text: string;
@@ -53,7 +53,7 @@ export interface SpawnOptions {
 
 let emptyAgentDir: string | undefined;
 function getEmptyAgentDir(): string {
-  emptyAgentDir ??= mkdtempSync(join(tmpdir(), "pi-fable-subagent-"));
+  emptyAgentDir ??= mkdtempSync(join(tmpdir(), "pi-fairy-tales-subagent-"));
   return emptyAgentDir;
 }
 
@@ -72,12 +72,12 @@ export class AgentRunner {
   private nextId = 1;
 
   constructor(
-    private cfg: () => FableConfig,
+    private cfg: () => FairyTalesConfig,
     private onStatus: (running: RunSummary[]) => void,
     private onCost: (usd: number) => void,
   ) {}
 
-  setConfig(cfg: () => FableConfig): void {
+  setConfig(cfg: () => FairyTalesConfig): void {
     this.cfg = cfg;
   }
 
@@ -139,7 +139,7 @@ export class AgentRunner {
     const resolved = resolveTierModel(opts.modelRegistry, cfg, role.tier);
     if (!resolved) {
       warnings.push(
-        `Tier "${role.tier}" model unavailable — subagent ran on the lead session's model instead. Check tiers in fable config.`,
+        `Tier "${role.tier}" model unavailable — subagent ran on the lead session's model instead. Check tiers in fairy-tales config.`,
       );
     }
     const model = (resolved?.model ?? opts.fallbackModel) as { id?: string } | undefined;
@@ -178,7 +178,7 @@ export class AgentRunner {
     role: RoleConfig,
     resolved: { model: unknown; thinkingLevel: string | undefined } | undefined,
     opts: SpawnOptions,
-    cfg: FableConfig,
+    cfg: FairyTalesConfig,
     warnings: string[],
   ): Promise<RunResult> {
     const summary = run.summary;
@@ -190,7 +190,7 @@ export class AgentRunner {
       extensionFactories: [hooksExtension, webExtension],
     });
     const g = globalThis as Record<string, unknown>;
-    g.__fableDepth = ((g.__fableDepth as number | undefined) ?? 0) + 1;
+    g.__fairyTalesDepth = ((g.__fairyTalesDepth as number | undefined) ?? 0) + 1;
     let session: Awaited<ReturnType<typeof createAgentSession>>["session"];
     try {
       await loader.reload();
@@ -206,7 +206,7 @@ export class AgentRunner {
       session = created.session;
       if (created.modelFallbackMessage) warnings.push(created.modelFallbackMessage);
     } finally {
-      g.__fableDepth = Math.max(0, ((g.__fableDepth as number | undefined) ?? 1) - 1);
+      g.__fairyTalesDepth = Math.max(0, ((g.__fairyTalesDepth as number | undefined) ?? 1) - 1);
     }
 
     if (summary.state !== "running") {
@@ -279,7 +279,7 @@ export class AgentRunner {
       } else if (assistant?.errorMessage) {
         summary.state = "error";
         text = `${text ? `${text}\n\n` : ""}Provider error in subagent (model ${summary.model}): ${assistant.errorMessage}`;
-        warnings.push("The subagent's model call failed — consider a different tier model in fable config.");
+        warnings.push("The subagent's model call failed — consider a different tier model in fairy-tales config.");
       } else if (!text) {
         text = "(subagent produced no final text)";
       }

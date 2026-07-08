@@ -1,6 +1,6 @@
 /**
- * Fable config: shipped defaults (fable.config.json in this package) deep-merged with
- * ~/.pi/agent/fable.json (user) and <cwd>/.pi/fable.json (project). Later wins.
+ * Fairy-Tales config: shipped defaults (fairy-tales.config.json in this package) deep-merged with
+ * ~/.pi/agent/fairy-tales.json (user) and <cwd>/.pi/fairy-tales.json (project). Later wins.
  */
 import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -31,7 +31,7 @@ export interface PathRule {
   reason?: string;
 }
 
-export interface FableConfig {
+export interface FairyTalesConfig {
   tiers: Record<string, TierConfig>;
   agents: {
     maxConcurrent: number;
@@ -74,7 +74,7 @@ function readJson(path: string): Record<string, unknown> | undefined {
     return JSON.parse(readFileSync(path, "utf-8"));
   } catch (err) {
     // A malformed override file must not brick pi; caller surfaces via diagnostics.
-    loadDiagnostics.push(`fable config: failed to parse ${path}: ${String(err)}`);
+    loadDiagnostics.push(`fairy-tales config: failed to parse ${path}: ${String(err)}`);
     return undefined;
   }
 }
@@ -83,12 +83,12 @@ export const loadDiagnostics: string[] = [];
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-export function loadFableConfig(cwd: string): FableConfig {
+export function loadFairyTalesConfig(cwd: string): FairyTalesConfig {
   loadDiagnostics.length = 0;
-  const defaults = readJson(join(packageRoot, "fable.config.json")) as unknown as FableConfig;
-  const user = readJson(join(homedir(), ".pi", "agent", "fable.json"));
-  const project = readJson(join(cwd, ".pi", "fable.json"));
-  return deepMerge(deepMerge(defaults, user as Partial<FableConfig>), project as Partial<FableConfig>);
+  const defaults = readJson(join(packageRoot, "fairy-tales.config.json")) as unknown as FairyTalesConfig;
+  const user = readJson(join(homedir(), ".pi", "agent", "fairy-tales.json"));
+  const project = readJson(join(cwd, ".pi", "fairy-tales.json"));
+  return deepMerge(deepMerge(defaults, user as Partial<FairyTalesConfig>), project as Partial<FairyTalesConfig>);
 }
 
 /**
@@ -97,7 +97,7 @@ export function loadFableConfig(cwd: string): FableConfig {
  */
 export function resolveTierModel(
   modelRegistry: { find(provider: string, id: string): unknown },
-  cfg: FableConfig,
+  cfg: FairyTalesConfig,
   tierName: string,
 ): { model: unknown; thinkingLevel: string | undefined } | undefined {
   const tier = cfg.tiers?.[tierName];
@@ -111,7 +111,7 @@ export function resolveTierModel(
   return { model, thinkingLevel: tier.thinkingLevel };
 }
 
-/** True when this extension instance is running inside a fable subagent. */
+/** True when this extension instance is running inside a fairy-tales subagent. */
 export function isNested(): boolean {
-  return ((globalThis as Record<string, unknown>).__fableDepth as number | undefined ?? 0) > 0;
+  return ((globalThis as Record<string, unknown>).__fairyTalesDepth as number | undefined ?? 0) > 0;
 }

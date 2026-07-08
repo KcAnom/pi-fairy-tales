@@ -1,5 +1,5 @@
 /**
- * fable-todo: TodoWrite-style task tracking.
+ * fairy-tales-todo: TodoWrite-style task tracking.
  * - `todo` tool with whole-list `write` semantics (plus `list`).
  * - State lives in each tool result's `details.todos` and is rebuilt from the
  *   session branch on session_start — branch- and fork-correct by construction.
@@ -32,7 +32,7 @@ export default function (pi: ExtensionAPI) {
   const updateWidget = (ctx: { hasUI: boolean; ui: { setWidget(key: string, lines?: string[], opts?: { placement?: string }): void } }) => {
     if (!ctx.hasUI || isNested()) return;
     const visible = todos.length > 0 && todos.some((t) => t.status !== "done");
-    ctx.ui.setWidget("fable-todo", visible ? renderLines(todos) : undefined, { placement: "aboveEditor" });
+    ctx.ui.setWidget("fairy-tales-todo", visible ? renderLines(todos) : undefined, { placement: "aboveEditor" });
   };
 
   pi.registerTool({

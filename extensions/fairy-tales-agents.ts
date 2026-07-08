@@ -1,5 +1,5 @@
 /**
- * fable-agents: subagent orchestration (the Task-tool equivalent).
+ * fairy-tales-agents: subagent orchestration (the Task-tool equivalent).
  * - `agent` tool: delegate a task to a role-specialized nested agent session.
  *   Multiple agent calls in one assistant message run concurrently (pi's
  *   default parallel tool execution) — that IS the fan-out mechanism.
@@ -9,7 +9,7 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { loadFableConfig, isNested, type FableConfig } from "../src/config.ts";
+import { loadFairyTalesConfig, isNested, type FairyTalesConfig } from "../src/config.ts";
 import { AgentRunner } from "../src/subagent/engine.ts";
 import { AGENTS_STATUS, COST_ADD, type RunSummary } from "../src/bus.ts";
 import { fmtDuration, fmtUsd } from "../src/text.ts";
@@ -17,11 +17,11 @@ import { fmtDuration, fmtUsd } from "../src/text.ts";
 export default function (pi: ExtensionAPI) {
   if (isNested()) return; // structurally excluded from subagents anyway; belt and suspenders
 
-  let cfg: FableConfig | undefined;
+  let cfg: FairyTalesConfig | undefined;
   let uiRef: { hasUI: boolean; ui: { setWidget(k: string, l?: string[], o?: { placement?: string }): void } } | undefined;
 
   const runner = new AgentRunner(
-    () => cfg ?? loadFableConfig(process.cwd()),
+    () => cfg ?? loadFairyTalesConfig(process.cwd()),
     (running) => {
       pi.events.emit(AGENTS_STATUS, { running });
       updateWidget(running);
@@ -37,14 +37,14 @@ export default function (pi: ExtensionAPI) {
         const secs = fmtDuration(Date.now() - r.startedAt);
         return ` ◐ ${r.name} [${r.role}·${r.model}] ${r.lastActivity} · t${r.turns} · ${fmtUsd(r.costUsd)} · ${secs}`;
       });
-      uiRef.ui.setWidget("fable-agents", lines.length ? lines : undefined, { placement: "aboveEditor" });
+      uiRef.ui.setWidget("fairy-tales-agents", lines.length ? lines : undefined, { placement: "aboveEditor" });
     } catch {
       // stale ui after reload — refreshed on next session_start
     }
   };
 
   pi.on("session_start", async (_event, ctx) => {
-    cfg = loadFableConfig(ctx.cwd);
+    cfg = loadFairyTalesConfig(ctx.cwd);
     uiRef = ctx;
   });
 
@@ -72,7 +72,7 @@ export default function (pi: ExtensionAPI) {
       background: Type.Optional(Type.Boolean({ description: "Run in background; result is delivered on completion" })),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      cfg = loadFableConfig(ctx.cwd);
+      cfg = loadFairyTalesConfig(ctx.cwd);
       const { id, promise } = runner.spawn({
         role: params.role,
         task: params.task,
@@ -101,7 +101,7 @@ export default function (pi: ExtensionAPI) {
         .then((result) => {
           pi.sendMessage(
             {
-              customType: "fable-agent-result",
+              customType: "fairy-tales-agent-result",
               content: `Background agent "${result.summary.name}" (${result.summary.role}) finished:\n\n${result.text}`,
               display: true,
             },
@@ -112,7 +112,7 @@ export default function (pi: ExtensionAPI) {
           try {
             pi.sendMessage(
               {
-                customType: "fable-agent-result",
+                customType: "fairy-tales-agent-result",
                 content: `Background agent failed: ${String(err)}`,
                 display: true,
               },

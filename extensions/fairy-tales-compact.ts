@@ -1,6 +1,6 @@
 /**
- * fable-compact: structured compaction summaries.
- * Replaces pi's default compaction summary with a Fable-style structured
+ * fairy-tales-compact: structured compaction summaries.
+ * Replaces pi's default compaction summary with a Fairy-Tales-style structured
  * handoff (request/intent, decisions, files, done, pending, next step),
  * produced by a one-shot toolless agent session on the current model.
  * Any failure returns undefined so pi's default compaction takes over.
@@ -58,7 +58,7 @@ export default function (pi: ExtensionAPI) {
 
       const loader = new DefaultResourceLoader({
         cwd: ctx.cwd,
-        agentDir: mkdtempSync(join(tmpdir(), "pi-fable-compact-")),
+        agentDir: mkdtempSync(join(tmpdir(), "pi-fairy-tales-compact-")),
         settingsManager: SettingsManager.inMemory({}),
         systemPromptOverride: () => SUMMARIZER_PROMPT,
       });
@@ -96,7 +96,7 @@ export default function (pi: ExtensionAPI) {
             summary,
             firstKeptEntryId: preparation.firstKeptEntryId,
             tokensBefore: preparation.tokensBefore,
-            details: { fable: true },
+            details: { fairyTales: true },
           },
         };
       } finally {
