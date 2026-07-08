@@ -61,7 +61,7 @@ Or skip tiers entirely: run `/agent-model` inside pi and pick "Single — follow
 
 Defaults ship in [`fairy-tales.config.json`](fairy-tales.config.json). Override globally in `~/.pi/agent/fairy-tales.json` or per project in `<project>/.pi/fairy-tales.json` (deep-merged, project wins). Key sections:
 
-- `tiers` — model per tier (`provider/model-id` + thinkingLevel). Default: all three tiers on `zai/glm-5.2` (GLM-5.2, 1M context) with low/medium/high thinking — cheap-fast scouts and deep-thinking brains on one model. Point them at your own models by editing `~/.pi/agent/fairy-tales.json`.
+- `tiers` — model per tier (`provider/model-id` + thinkingLevel). **Out of the box, subagents follow your session model** (`modelMode: "single"`, `singleModel: "session"`) so a fresh install just works with no warnings. To get cheap-fast scouts and deep-thinking brains, switch to tiered — run `/agent-model` inside pi, or set real models in `~/.pi/agent/fairy-tales.json` and set `"modelMode": "tiered"`.
 - `agents` — `maxConcurrent`, `maxTurnsPerRun`, `maxCostPerRunUsd`, `modelMode` (`"tiered"` | `"single"`), `singleModel` (`"session"` or a `provider/model-id`), and the role definitions (tier, tool allowlist, description, `promptAppend`). Prefer `/agent-model` over hand-editing the mode.
 - `hooks.bash` / `hooks.paths` — your guard-rail rules (regex / glob, `block` or `confirm`).
 - `hooks.postEdit` — post-edit test runner (reads `<project>/.pi/test-command`).

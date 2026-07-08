@@ -1,14 +1,14 @@
 {
   "tiers": {
-    "scout": { "model": "zai/glm-5.2", "thinkingLevel": "low" },
-    "worker": { "model": "zai/glm-5.2", "thinkingLevel": "medium" },
-    "brain": { "model": "zai/glm-5.2", "thinkingLevel": "high" }
+    "scout": { "model": "provider/cheap-fast-model", "thinkingLevel": "low" },
+    "worker": { "model": "provider/main-model", "thinkingLevel": "medium" },
+    "brain": { "model": "provider/best-model", "thinkingLevel": "high" }
   },
   "agents": {
     "maxConcurrent": 5,
     "maxTurnsPerRun": 50,
     "maxCostPerRunUsd": 1.5,
-    "modelMode": "tiered",
+    "modelMode": "single",
     "singleModel": "session",
     "roles": {
       "explore": {

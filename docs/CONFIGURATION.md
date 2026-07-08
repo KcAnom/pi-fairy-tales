@@ -31,11 +31,13 @@ Named model tiers referenced by subagent roles.
   "maxConcurrent": 5,
   "maxTurnsPerRun": 50,
   "maxCostPerRunUsd": 1.5,
-  "modelMode": "tiered",
+  "modelMode": "single",
   "singleModel": "session",
   "roles": { ... }
 }
 ```
+
+**Default is `"single"` + `"session"`** — subagents follow your session model out of the box, so a fresh install runs with no configuration and no fallback warnings. Switch to `"tiered"` (via `/agent-model` or config) once you've set real tier models.
 
 | Key | Meaning |
 |---|---|
