@@ -37,6 +37,10 @@ export interface FairyTalesConfig {
     maxConcurrent: number;
     maxTurnsPerRun: number;
     maxCostPerRunUsd: number;
+    /** "tiered" = per-role tier models; "single" = every subagent uses singleModel */
+    modelMode: "tiered" | "single";
+    /** "session" = follow the lead session's current model, or "provider/model-id" */
+    singleModel: string;
     roles: Record<string, RoleConfig>;
   };
   memory: { dir: string; injectIndex: boolean };
@@ -114,4 +118,21 @@ export function resolveTierModel(
 /** True when this extension instance is running inside a fairy-tales subagent. */
 export function isNested(): boolean {
   return ((globalThis as Record<string, unknown>).__fairyTalesDepth as number | undefined ?? 0) > 0;
+}
+
+/**
+ * Persist a partial config into the user override file (~/.pi/agent/fairy-tales.json),
+ * deep-merged over whatever is already there. Used by /agent-model.
+ */
+export async function saveUserConfig(patch: Record<string, unknown>): Promise<string> {
+  const { withFileMutationQueue } = await import("@earendil-works/pi-coding-agent");
+  const { writeFile, mkdir } = await import("node:fs/promises");
+  const path = join(homedir(), ".pi", "agent", "fairy-tales.json");
+  await withFileMutationQueue(path, async () => {
+    const current = readJson(path) ?? {};
+    const next = deepMerge(current, patch as never);
+    await mkdir(join(homedir(), ".pi", "agent"), { recursive: true });
+    await writeFile(path, JSON.stringify(next, null, 2) + "\n", "utf-8");
+  });
+  return path;
 }

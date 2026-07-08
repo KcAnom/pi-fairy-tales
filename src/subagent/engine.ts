@@ -136,11 +136,33 @@ export class AgentRunner {
 
     const id = `a${this.nextId++}`;
     const warnings: string[] = [];
-    const resolved = resolveTierModel(opts.modelRegistry, cfg, role.tier);
-    if (!resolved) {
-      warnings.push(
-        `Tier "${role.tier}" model unavailable — subagent ran on the lead session's model instead. Check tiers in fairy-tales config.`,
-      );
+    let resolved: { model: unknown; thinkingLevel: string | undefined } | undefined;
+
+    if (cfg.agents.modelMode === "single") {
+      // Single mode: every role runs on one model; roles keep their tier's thinking level.
+      const tierThinking = cfg.tiers?.[role.tier]?.thinkingLevel;
+      const single = cfg.agents.singleModel;
+      if (!single || single === "session") {
+        resolved = { model: opts.fallbackModel, thinkingLevel: tierThinking };
+      } else {
+        const slash = single.indexOf("/");
+        const found =
+          slash > 0 ? opts.modelRegistry.find(single.slice(0, slash), single.slice(slash + 1)) : undefined;
+        if (found) {
+          resolved = { model: found, thinkingLevel: tierThinking };
+        } else {
+          warnings.push(
+            `Single model "${single}" not found — subagent ran on the lead session's model instead. Fix with /agent-model.`,
+          );
+        }
+      }
+    } else {
+      resolved = resolveTierModel(opts.modelRegistry, cfg, role.tier);
+      if (!resolved) {
+        warnings.push(
+          `Tier "${role.tier}" model unavailable — subagent ran on the lead session's model instead. Check tiers in fairy-tales config.`,
+        );
+      }
     }
     const model = (resolved?.model ?? opts.fallbackModel) as { id?: string } | undefined;
 

@@ -1,13 +1,15 @@
 {
   "tiers": {
-    "scout": { "model": "openai-codex/gpt-5.4-mini", "thinkingLevel": "low" },
+    "scout": { "model": "deepseek-openai/deepseek-v4-flash", "thinkingLevel": "low" },
     "worker": { "model": "openai-codex/gpt-5.4-mini", "thinkingLevel": "medium" },
-    "brain": { "model": "openai-codex/gpt-5.4-mini", "thinkingLevel": "high" }
+    "brain": { "model": "deepseek-openai/deepseek-v4-pro", "thinkingLevel": "high" }
   },
   "agents": {
     "maxConcurrent": 3,
     "maxTurnsPerRun": 30,
     "maxCostPerRunUsd": 1.5,
+    "modelMode": "tiered",
+    "singleModel": "session",
     "roles": {
       "explore": {
         "tier": "scout",

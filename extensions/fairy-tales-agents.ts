@@ -9,7 +9,7 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { loadFairyTalesConfig, isNested, type FairyTalesConfig } from "../src/config.ts";
+import { loadFairyTalesConfig, saveUserConfig, isNested, type FairyTalesConfig } from "../src/config.ts";
 import { AgentRunner } from "../src/subagent/engine.ts";
 import { AGENTS_STATUS, COST_ADD, type RunSummary } from "../src/bus.ts";
 import { fmtDuration, fmtUsd } from "../src/text.ts";
@@ -168,6 +168,44 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: `${params.id} is still ${run.summary.state} (${run.summary.lastActivity}).` }],
       };
+    },
+  });
+
+  pi.registerCommand("agent-model", {
+    description: "Choose how subagents pick models: tiered per role, or one model for all",
+    handler: async (_args, ctx) => {
+      const current = loadFairyTalesConfig(ctx.cwd);
+      const mode =
+        current.agents.modelMode === "single"
+          ? `single (${current.agents.singleModel === "session" ? "follows session model" : current.agents.singleModel})`
+          : "tiered (per role)";
+
+      const TIERED = "Tiered — per-role models from config";
+      const SESSION = "Single — always follow my session model";
+      const available =
+        (await (ctx.modelRegistry as { getAvailable(): Promise<Array<{ provider: string; id: string }>> })
+          .getAvailable()) ?? [];
+      const modelItems = available.map((m) => `Single — ${m.provider}/${m.id}`);
+
+      const choice = await ctx.ui.select(`Subagent model mode (now: ${mode})`, [TIERED, SESSION, ...modelItems]);
+      if (choice === undefined) return;
+
+      let patch: { agents: { modelMode: string; singleModel?: string } };
+      let label: string;
+      if (choice === TIERED) {
+        patch = { agents: { modelMode: "tiered" } };
+        label = "tiered (per role)";
+      } else if (choice === SESSION) {
+        patch = { agents: { modelMode: "single", singleModel: "session" } };
+        label = "single: session model";
+      } else {
+        const spec = choice.replace("Single — ", "");
+        patch = { agents: { modelMode: "single", singleModel: spec } };
+        label = `single: ${spec}`;
+      }
+      const path = await saveUserConfig(patch);
+      cfg = loadFairyTalesConfig(ctx.cwd);
+      ctx.ui.notify(`Subagent models: ${label} (saved to ${path})`, "info");
     },
   });
 
