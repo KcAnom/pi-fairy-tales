@@ -102,10 +102,31 @@ Shipped defaults block recursive force-deletes of root/home and writes to `.env*
 ## `web`
 
 ```json
-"web": { "timeoutMs": 20000, "maxBytes": 51200 }
+"web": { "timeoutMs": 20000, "maxBytes": 51200, "blockPrivateHosts": true }
 ```
 
-Controls the `fetch` tool: request timeout and response truncation.
+Controls the `fetch` tool: request timeout, response byte cap (streamed — the download aborts past it), and SSRF protection. `blockPrivateHosts` (default true) rejects private, loopback, and link-local hosts, re-checking after every redirect.
+
+## `hooks.bashAppend` / `hooks.pathsAppend`
+
+Additive rule arrays — concatenated onto the shipped defaults instead of replacing them. **Prefer these** over overriding `hooks.bash`/`hooks.paths` wholesale (which drops the built-in safety guards; the loader warns if you do).
+
+```json
+"hooks": { "bashAppend": [ { "pattern": "\\bterraform\\s+destroy\\b", "action": "confirm" } ] }
+```
+
+## `compaction`
+
+```json
+"compaction": { "tier": "scout", "proactiveAtPercent": 85 }
+```
+
+- `tier` — which tier model summarizes during compaction and `/tale` (a cheap tier saves cost). Omit to use the lead model.
+- `proactiveAtPercent` — when context usage crosses this %, compact automatically with focus instructions rather than waiting for pi's trigger. Omit to disable proactive compaction.
+
+## Debugging
+
+Set `FAIRY_TALES_DEBUG=1` to log internal diagnostics (swallowed errors, config problems, overlay/subagent internals) to `$TMPDIR/fairy-tales-debug.log`.
 
 ## pi settings that pair well (in `~/.pi/agent/settings.json`)
 

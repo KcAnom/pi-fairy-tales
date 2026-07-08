@@ -39,18 +39,22 @@ Or skip tiers entirely: run `/agent-model` inside pi and pick "Single — follow
 
 | Piece | What it does |
 |---|---|
-| `agent` tool | Delegate to role-specialized subagents: **explore** (read-only scout), **plan** (architect), **build** (implements + verifies), **review** (defect finder), **general**. Multiple `agent` calls in one assistant message run in parallel. `background: true` runs detached and delivers the result when done. Turn/cost/concurrency caps enforced. |
-| `agent_control` tool + `/agents` | List, fetch results, or abort runs. Live widget above the editor while agents run. |
-| `/agent-model` | Switch subagent model strategy on the fly: **tiered** (per-role models from config) or **single** (one model for every role — follow your session model, or pick any model loaded in pi). Persists in `~/.pi/agent/fairy-tales.json`; roles keep their tier's thinking level in single mode. |
-| Memory | `~/.pi/agent/memory/MEMORY.md` index injected each session; `remember` tool saves facts (optionally into `topics/*.md`); `/memory` edits the index. |
-| Plan mode | `/plan`, `--plan` flag, or `ctrl+alt+p`. Read-only until the agent presents its plan via `exit_plan` and you approve; approved plans are saved to `~/.pi/agent/plans/`. Survives restarts. |
-| Hooks | Config-driven guard rails: bash regex rules and path glob rules (`block` / `confirm`, confirm fail-safes to block headless). Post-edit hook runs `<project>/.pi/test-command` after file edits and steers failures back to the agent to self-fix. Active inside subagents too. |
-| `todo` tool | Checklist for multi-step tasks, widget above the editor, state survives restart/fork (rebuilt from the session branch). |
-| Smart compaction | `/compact` and auto-compaction produce a structured handoff summary (Request & Intent / Key Decisions / Files & State / Done / Pending). Falls back to pi's default on any error. |
-| Status line | `model · ctx N% · $cost · ⚡running agents` in the footer. |
-| `fetch` tool | URL → readable text (HTML stripped), 20s timeout, 50KB cap. |
-| Skills | `deep-review` (parallel multi-agent review with verification), `handoff` (session handoff doc), `ship` (verify → commit → report). |
-| Prompts | `/commit`, `/review`, `/plan-task`, `/standup` — see `prompts/`. |
+| `agent` tool | Delegate to role-specialized subagents: **explore**, **plan**, **build**, **review**, **general** (config-driven — add your own). Multiple calls in one message run in parallel; overflow **queues** instead of failing. Each returns a structured result envelope; `background: true` runs detached. Turn/cost/concurrency caps enforced, with token-based cost estimation on subscription models and transient-error retry. |
+| `agent_control` tool + `/agents` | `list` / `result` / `abort`, plus `continue` (send a follow-up to a just-finished agent, reusing its context) and `transcript` (path to a run's full log). Live widget while agents run. |
+| `/agent-model` | Switch subagent model strategy: **tiered** (per-role) or **single** (one model — session or a specific one). Persists to `~/.pi/agent/fairy-tales.json`. |
+| Memory | Relevance-ranked `MEMORY.md` injected each session; `remember` (deduped) and `forget` tools; `#topic` autocomplete; `/memory` editor. |
+| Plan mode | `/plan`, `--plan`, or `ctrl+alt+p`. Truly read-only — no delegate-to-write escape; saved plans in `~/.pi/agent/plans/`; branch-correct across forks. |
+| Hooks | Bash regex + path glob guard rails (`block`/`confirm`, headless fail-safe) that also catch **bash-mediated writes** and normalize quote/`$HOME` evasion. Post-edit hook runs `<project>/.pi/test-command` and steers failures back to self-fix. Active inside subagents. |
+| Checkpoints | `/checkpoints` and `/rollback` — non-destructive git snapshots after edits, so a broken change can return to the last good state. |
+| `todo` tool | Multi-step checklist, widget, state survives restart/fork. |
+| Smart compaction | Structured handoff summaries on a cheap tier, keeping the recent tail; triggers **proactively** at a context threshold; falls back to pi's default on error. Provider overflow errors normalized so compaction engages. |
+| Status line | `model · ctx% · $cost · ⚡agents` (one owner of the vitals). |
+| `fetch` tool | URL → readable text, **SSRF-protected** (blocks private/loopback hosts), streamed to a byte cap. |
+| **`artifact` tool** | Produce a polished, self-contained, theme-aware HTML document (report/roadmap/dashboard) and open it in the browser. Backed by the `artifact` design skill. |
+| Input shortcuts | `??` ask-mode (answer read-only this turn), `>>` verbatim. |
+| Skills | `deep-review`, `handoff`, `ship`, `artifact`. |
+| Prompts | `/commit`, `/review`, `/plan-task`, `/standup`. |
+| `/grimoire` | Scrollable on-demand catalog of skills/prompts/extensions/themes (pairs with `quietStartup`). |
 | `/grimoire` | Browse installed skills, prompts, extensions, and themes in a book overlay. Pairs with pi's `quietStartup: true` setting (enabled) so startup is clean instead of listing everything. Works in plain pi and ftales. |
 
 ## Configuration
