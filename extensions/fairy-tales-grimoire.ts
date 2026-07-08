@@ -7,6 +7,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { basename } from "node:path";
 import { isNested } from "../src/config.ts";
+import { closeOverlay } from "../src/banner.ts";
 
 export default function (pi: ExtensionAPI) {
   if (isNested()) return;
@@ -56,7 +57,7 @@ export default function (pi: ExtensionAPI) {
 
       await ctx.ui.custom(
         (
-          _tui: unknown,
+          tui: unknown,
           theme: { fg(c: string, s: string): string; bold(s: string): string },
           _kb: unknown,
           done: (v: undefined) => void,
@@ -78,7 +79,7 @@ export default function (pi: ExtensionAPI) {
           },
           invalidate() {},
           handleInput(data: string) {
-            if (data) done(undefined);
+            if (data) closeOverlay(tui, done);
           },
         }),
         { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },

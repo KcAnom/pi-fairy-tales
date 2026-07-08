@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { isNested, loadFairyTalesConfig, saveUserConfig } from "../src/config.ts";
+import { renderMasthead } from "../src/banner.ts";
 
 const SPARKLES = ["·", "✦", "✧", "⋆", "✧", "✦"];
 
@@ -75,19 +76,7 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.setHeader((_tui: unknown, t: { fg(color: string, text: string): string; bold(text: string): string }) => ({
       invalidate() {},
       render(width: number): string[] {
-        const center = (s: string, visible: number) => {
-          const pad = Math.max(0, Math.floor((width - visible) / 2));
-          return " ".repeat(pad) + s;
-        };
-        const dust = "·  ✦    ·   ✧      ·     ✦   ·    ✧  ·";
-        const title = "F A I R Y   T A L E S";
-        const sub = "~ once upon a terminal ~";
-        return [
-          center(t.fg("dim", dust), dust.length),
-          center(t.fg("accent", t.bold(`✧  ${title}  ✧`)), title.length + 6),
-          center(t.fg("muted", sub), sub.length),
-          center(t.fg("dim", dust), dust.length),
-        ];
+        return renderMasthead(t, width);
       },
     }));
 

@@ -21,6 +21,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isNested } from "../src/config.ts";
+import { renderMasthead, closeOverlay } from "../src/banner.ts";
 import { AGENTS_STATUS, COST_ADD, type AgentsStatusPayload, type CostAddPayload } from "../src/bus.ts";
 import { clipHead, fmtUsd } from "../src/text.ts";
 
@@ -145,33 +146,20 @@ export default function (pi: ExtensionAPI) {
     try {
       void ctx.ui.custom(
         (
-          _tui: unknown,
+          tui: unknown,
           theme: { fg(c: string, s: string): string; bold(s: string): string },
           _keybindings: unknown,
           done: (v: undefined) => void,
         ) => {
-          const timer = setTimeout(() => done(undefined), 1800);
+          const timer = setTimeout(() => closeOverlay(tui, done), 1800);
           return {
             render(width: number): string[] {
-              const center = (s: string, len: number) =>
-                " ".repeat(Math.max(0, Math.floor((width - len) / 2))) + s;
-              const dust = "· ✦ · ✧ · ⋆ · ✧ · ✦ ·";
-              const title = "F A I R Y   T A L E S";
-              return [
-                "",
-                center(theme.fg("dim", dust), dust.length),
-                "",
-                center(theme.fg("accent", theme.bold(title)), title.length),
-                center(theme.fg("muted", "~ once upon a terminal ~"), 24),
-                "",
-                center(theme.fg("dim", dust), dust.length),
-                "",
-              ];
+              return ["", ...renderMasthead(theme, width), ""];
             },
             invalidate() {},
             handleInput(data: string) {
               clearTimeout(timer);
-              done(undefined);
+              closeOverlay(tui, done);
               void data;
             },
           };
@@ -233,7 +221,7 @@ export default function (pi: ExtensionAPI) {
           }
           await ctx.ui.custom(
             (
-              _tui: unknown,
+              tui: unknown,
               theme: { fg(c: string, s: string): string; bold(s: string): string },
               _kb: unknown,
               done: (v: undefined) => void,
@@ -256,7 +244,7 @@ export default function (pi: ExtensionAPI) {
               },
               invalidate() {},
               handleInput(data: string) {
-                if (data) done(undefined);
+                if (data) closeOverlay(tui, done);
               },
             }),
             { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },
