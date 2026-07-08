@@ -47,7 +47,7 @@ Defaults ship in [`fairy-tales.config.json`](fairy-tales.config.json). Override 
 
 ## `ftales` — the branded launcher
 
-`ftales` (a tiny wrapper installed next to the `pi` binary) launches the same pi with the **Fairy Tales experience** turned on:
+`ftales` (a tiny wrapper at `~/bin/ftales` — outside Node's version folders, so it survives Node upgrades) launches the same pi with the **Fairy Tales experience** turned on:
 
 - the `fairy-tales` theme (twilight purple / fairy-dust gold, ships in `themes/`)
 - a "✧ F A I R Y  T A L E S ✧ — once upon a terminal" startup header
@@ -56,7 +56,7 @@ Defaults ship in [`fairy-tales.config.json`](fairy-tales.config.json). Override 
 
 Plain `pi` stays completely unbranded. pi persists theme switches to settings.json, so the brand extension records your previous theme in `~/.pi/agent/fairy-tales.json` when `ftales` starts, and the next plain `pi` session automatically switches back. All other harness features (subagents, memory, hooks…) are identical in both.
 
-The launcher is just `FTALES=1 exec pi "$@"` — recreate it anywhere with:
+The launcher is just `FTALES=1 exec pi "$@"`. It lives in `~/bin` (already on PATH), so Node/nvm upgrades never remove it. Recreate if ever needed with:
 ```bash
-printf '#!/bin/sh\nexport FTALES=1\nexec pi "$@"\n' > "$(dirname "$(which pi)")/ftales" && chmod +x "$(dirname "$(which pi)")/ftales"
+printf '#!/bin/sh\nexport FTALES=1\nexec pi "$@"\n' > ~/bin/ftales && chmod +x ~/bin/ftales
 ```
