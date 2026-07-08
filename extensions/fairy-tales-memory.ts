@@ -22,6 +22,38 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     store = new MemoryStore(loadFairyTalesConfig(ctx.cwd).memory.dir);
     injected = false;
+
+    // Autocomplete: typing "#" suggests saved memory topics to reference (#31).
+    if (ctx.hasUI && typeof ctx.ui.addAutocompleteProvider === "function") {
+      try {
+        ctx.ui.addAutocompleteProvider((current: {
+          getSuggestions(l: string[], line: number, col: number, o: unknown): unknown;
+          applyCompletion(l: string[], line: number, col: number, item: unknown, prefix: string): unknown;
+          shouldTriggerFileCompletion?(l: string[], line: number, col: number): boolean;
+        }) => ({
+          async getSuggestions(lines: string[], line: number, col: number, options: unknown) {
+            const before = (lines[line] ?? "").slice(0, col);
+            const m = before.match(/(?:^|[ \t])#([^\s#]*)$/);
+            if (!m) return current.getSuggestions(lines, line, col, options);
+            const topics = getStore(ctx.cwd).listTopics();
+            const q = (m[1] ?? "").toLowerCase();
+            const items = topics
+              .filter((t) => t.toLowerCase().includes(q))
+              .slice(0, 8)
+              .map((t) => ({ value: `#${t}`, label: `#${t}`, description: "saved memory topic" }));
+            return { prefix: `#${m[1] ?? ""}`, items };
+          },
+          applyCompletion(lines: string[], line: number, col: number, item: unknown, prefix: string) {
+            return current.applyCompletion(lines, line, col, item, prefix);
+          },
+          shouldTriggerFileCompletion(lines: string[], line: number, col: number) {
+            return current.shouldTriggerFileCompletion?.(lines, line, col) ?? true;
+          },
+        }));
+      } catch {
+        // autocomplete is optional polish
+      }
+    }
   });
 
   pi.on("session_compact", async () => {

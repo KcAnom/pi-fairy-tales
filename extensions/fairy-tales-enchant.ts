@@ -16,14 +16,13 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { isNested } from "../src/config.ts";
+import { wrapTextWithAnsi, Text } from "@earendil-works/pi-tui";
+import { isNested, loadFairyTalesConfig, resolveTierModel } from "../src/config.ts";
 import { renderMasthead, closeOverlay } from "../src/banner.ts";
+import { bookOverlay } from "../src/overlay.ts";
 import { AGENTS_STATUS, COST_ADD, type AgentsStatusPayload, type CostAddPayload } from "../src/bus.ts";
-import { clipHead, fmtUsd } from "../src/text.ts";
+import { clipTail, fmtUsd } from "../src/text.ts";
+import { emptyAgentDir, estimateCostUsd } from "../src/util.ts";
 
 const NARRATOR_PROMPT = `You are the Narrator of a storybook about a software developer's work. You receive a serialized coding-agent conversation and retell it as a short fairy-tale chapter.
 
@@ -43,26 +42,38 @@ export default function (pi: ExtensionAPI) {
   let goldUsd = 0;
   let sprites = 0;
   let requestRender: (() => void) | undefined;
+  let pendingRender = false;
+
+  // Buffer render requests that arrive before the footer mounts, then flush —
+  // otherwise early cost/agent/model updates are silently dropped (#24).
+  const scheduleRender = () => {
+    if (requestRender) requestRender();
+    else pendingRender = true;
+  };
 
   pi.events.on(COST_ADD, (d: CostAddPayload) => {
     goldUsd += d?.usd ?? 0;
-    requestRender?.();
+    scheduleRender();
   });
   pi.events.on(AGENTS_STATUS, (d: AgentsStatusPayload) => {
     sprites = (d?.running ?? []).filter((r) => r.state === "running").length;
-    requestRender?.();
+    scheduleRender();
   });
 
   pi.on("model_select", async (event) => {
     modelName = (event.model as { id?: string } | undefined)?.id ?? "";
-    requestRender?.();
+    scheduleRender();
   });
 
   pi.on("message_end", async (event) => {
-    const msg = event.message as { role?: string; usage?: { cost?: { total?: number } } };
-    if (msg.role === "assistant" && msg.usage?.cost?.total) {
-      goldUsd += msg.usage.cost.total;
-      requestRender?.();
+    const msg = event.message as {
+      role?: string;
+      usage?: { cost?: { total?: number }; input?: number; output?: number };
+    };
+    if (msg.role === "assistant" && msg.usage) {
+      const reported = msg.usage.cost?.total ?? 0;
+      goldUsd += reported > 0 ? reported : estimateCostUsd(msg.usage.input ?? 0, msg.usage.output ?? 0);
+      scheduleRender();
     }
   });
 
@@ -70,7 +81,7 @@ export default function (pi: ExtensionAPI) {
     const usage = ctx.getContextUsage();
     if (usage?.percent !== null && usage?.percent !== undefined) {
       inkPct = Math.max(0, 100 - Math.round(usage.percent));
-      requestRender?.();
+      scheduleRender();
     }
     // Name the session like a book chapter after the first exchange.
     try {
@@ -108,6 +119,10 @@ export default function (pi: ExtensionAPI) {
           },
         ) => {
           requestRender = () => tui.requestRender();
+          if (pendingRender) {
+            pendingRender = false;
+            tui.requestRender();
+          }
           return {
             invalidate() {},
             render(width: number): string[] {
@@ -171,7 +186,29 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // ---- /tale: the storybook recap ----
+  // ---- /tale: the storybook recap (cached, cheap-tier, cost-attributed) ----
+  let taleCache: { count: number; text: string } | undefined;
+
+  const showTale = async (
+    ctx: { hasUI: boolean; ui: { custom(f: unknown, o: unknown): Promise<unknown> } },
+    tale: string,
+  ) => {
+    await ctx.ui.custom(
+      (
+        tui: unknown,
+        theme: { fg(c: string, s: string): string; bold(s: string): string },
+        _kb: unknown,
+        done: (v: undefined) => void,
+      ) => {
+        const width = process.stdout.columns || 80;
+        const inner = Math.max(20, Math.floor(width * 0.8) - 4);
+        const contentLines = wrapTextWithAnsi(theme.fg("text", tale), inner);
+        return bookOverlay({ title: "❦ The Tale So Far ❦", contentLines, tui, theme, done });
+      },
+      { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },
+    );
+  };
+
   pi.registerCommand("tale", {
     description: "Retell this session as a storybook chapter",
     handler: async (_args, ctx) => {
@@ -184,27 +221,47 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("This tale has not begun yet — say something first.", "info");
         return;
       }
+      // Serve the cached tale if the conversation hasn't grown.
+      if (taleCache && taleCache.count === messages.length) {
+        await showTale(ctx, taleCache.text);
+        return;
+      }
       ctx.ui.setStatus("fairy-tales-tale", "✒ the narrator writes…");
       try {
         const conversation = serializeConversation(convertToLlm(messages as never));
+        const cfg = loadFairyTalesConfig(ctx.cwd);
+        const tier = cfg.compaction?.tier ? resolveTierModel(ctx.modelRegistry, cfg, cfg.compaction.tier) : undefined;
         const loader = new DefaultResourceLoader({
           cwd: ctx.cwd,
-          agentDir: mkdtempSync(join(tmpdir(), "pi-ft-tale-")),
+          agentDir: emptyAgentDir(),
           settingsManager: SettingsManager.inMemory({}),
           systemPromptOverride: () => NARRATOR_PROMPT,
         });
         await loader.reload();
         const { session } = await createAgentSession({
           cwd: ctx.cwd,
-          model: ctx.model as never,
-          thinkingLevel: "low" as never,
+          model: (tier?.model ?? ctx.model) as never,
+          thinkingLevel: (tier?.thinkingLevel ?? "low") as never,
           noTools: "all" as never,
           resourceLoader: loader,
           sessionManager: SessionManager.inMemory(ctx.cwd),
           settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
         });
+        // Attribute the narrator's cost to the gold ledger.
+        let taleCost = 0;
+        const unsub = (session as unknown as { subscribe(fn: (e: { type: string; [k: string]: unknown }) => void): () => void }).subscribe(
+          (e) => {
+            if (e.type === "message_end") {
+              const u = (e.message as { role?: string; usage?: { cost?: { total?: number }; input?: number; output?: number } })?.usage;
+              const role = (e.message as { role?: string })?.role;
+              if (role === "assistant" && u) {
+                taleCost += (u.cost?.total ?? 0) || estimateCostUsd(u.input ?? 0, u.output ?? 0);
+              }
+            }
+          },
+        );
         try {
-          await session.prompt(`Retell this conversation as a chapter:\n\n${clipHead(conversation, 200_000, 15_000)}`);
+          await session.prompt(`Retell this conversation as a chapter:\n\n${clipTail(conversation, 200_000, 15_000)}`);
           const assistant = [...session.messages]
             .reverse()
             .find((m: { role?: string }) => m.role === "assistant") as
@@ -219,37 +276,11 @@ export default function (pi: ExtensionAPI) {
             ctx.ui.notify("The narrator lost the thread — try again.", "warning");
             return;
           }
-          await ctx.ui.custom(
-            (
-              tui: unknown,
-              theme: { fg(c: string, s: string): string; bold(s: string): string },
-              _kb: unknown,
-              done: (v: undefined) => void,
-            ) => ({
-              render(width: number): string[] {
-                const inner = Math.max(20, width - 4);
-                const lines = wrapTextWithAnsi(theme.fg("text", tale), inner).map((l: string) => `  ${l}`);
-                const rule = theme.fg("dim", "· ✦ ".repeat(Math.max(1, Math.floor(inner / 4))));
-                return [
-                  "",
-                  `  ${theme.fg("accent", theme.bold("❦ The Tale So Far ❦"))}`,
-                  `  ${rule}`,
-                  "",
-                  ...lines,
-                  "",
-                  `  ${rule}`,
-                  `  ${theme.fg("dim", "press any key to close the book")}`,
-                  "",
-                ];
-              },
-              invalidate() {},
-              handleInput(data: string) {
-                if (data) closeOverlay(tui, done);
-              },
-            }),
-            { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },
-          );
+          taleCache = { count: messages.length, text: tale };
+          if (taleCost > 0) pi.events.emit(COST_ADD, { usd: taleCost });
+          await showTale(ctx, tale);
         } finally {
+          unsub();
           session.dispose();
         }
       } catch (err) {
@@ -258,5 +289,20 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.setStatus("fairy-tales-tale", undefined);
       }
     },
+  });
+
+  // ---- Message renderer cards (#27): agent results & hook messages render as
+  // titled cards instead of plain text.
+  pi.registerMessageRenderer("fairy-tales-agent-result", (message: { content?: string }, _opts: unknown, theme: { fg(c: string, s: string): string; bold(s: string): string }) => {
+    const body = message.content ?? "";
+    const width = (process.stdout.columns || 80) - 4;
+    const lines = wrapTextWithAnsi(theme.fg("text", body), Math.max(20, width));
+    return new Text([theme.fg("accent", theme.bold("✧ Sprite returns")), ...lines].join("\n"), 0, 0);
+  });
+  pi.registerMessageRenderer("fairy-tales-hook", (message: { content?: string }, _opts: unknown, theme: { fg(c: string, s: string): string; bold(s: string): string }) => {
+    const body = message.content ?? "";
+    const width = (process.stdout.columns || 80) - 4;
+    const lines = wrapTextWithAnsi(theme.fg("text", body), Math.max(20, width));
+    return new Text([theme.fg("warning", theme.bold("⚠ A trial failed")), ...lines].join("\n"), 0, 0);
   });
 }

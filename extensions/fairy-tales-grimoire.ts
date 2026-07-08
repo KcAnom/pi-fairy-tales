@@ -7,7 +7,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { basename } from "node:path";
 import { isNested } from "../src/config.ts";
-import { closeOverlay } from "../src/banner.ts";
+import { bookOverlay } from "../src/overlay.ts";
 
 export default function (pi: ExtensionAPI) {
   if (isNested()) return;
@@ -61,27 +61,18 @@ export default function (pi: ExtensionAPI) {
           theme: { fg(c: string, s: string): string; bold(s: string): string },
           _kb: unknown,
           done: (v: undefined) => void,
-        ) => ({
-          render(width: number): string[] {
-            const inner = Math.max(20, width - 4);
-            const rule = theme.fg("dim", "· ✦ ".repeat(Math.max(1, Math.floor(inner / 4))));
-            const lines: string[] = ["", `  ${theme.fg("accent", theme.bold("❦ The Grimoire ❦"))}`, `  ${rule}`, ""];
-            for (const block of body.split("\n\n")) {
-              const [head, ...rest] = block.split("\n");
-              lines.push(`  ${theme.fg("accent", head)}`);
-              for (const l of wrapTextWithAnsi(theme.fg("text", rest.join(" ")), inner - 2)) {
-                lines.push(`   ${l}`);
-              }
-              lines.push("");
-            }
-            lines.push(`  ${rule}`, `  ${theme.fg("dim", "press any key to close the book")}`, "");
-            return lines;
-          },
-          invalidate() {},
-          handleInput(data: string) {
-            if (data) closeOverlay(tui, done);
-          },
-        }),
+        ) => {
+          const width = process.stdout.columns || 80;
+          const inner = Math.max(20, Math.floor(width * 0.8) - 6);
+          const contentLines: string[] = [];
+          for (const block of body.split("\n\n")) {
+            const [head, ...rest] = block.split("\n");
+            contentLines.push(theme.fg("accent", head));
+            for (const l of wrapTextWithAnsi(theme.fg("text", rest.join(" ")), inner)) contentLines.push(` ${l}`);
+            contentLines.push("");
+          }
+          return bookOverlay({ title: "❦ The Grimoire ❦", contentLines, tui, theme, done });
+        },
         { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },
       );
     },

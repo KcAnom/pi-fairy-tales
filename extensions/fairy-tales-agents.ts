@@ -9,10 +9,20 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
+import { Text } from "@earendil-works/pi-tui";
 import { loadFairyTalesConfig, saveUserConfig, isNested, roleNames, type FairyTalesConfig } from "../src/config.ts";
 import { AgentRunner } from "../src/subagent/engine.ts";
 import { AGENTS_STATUS, COST_ADD, type RunSummary } from "../src/bus.ts";
-import { fmtDuration, fmtUsd } from "../src/text.ts";
+import { fmtDuration, fmtUsd, fmtTokens } from "../src/text.ts";
+
+// Storybook glyphs for roles (matches the Fae Council names when branded).
+const ROLE_GLYPH: Record<string, string> = {
+  explore: "🕯",
+  plan: "✶",
+  build: "⚒",
+  review: "🪶",
+  general: "🜍",
+};
 
 export default function (pi: ExtensionAPI) {
   if (isNested()) return; // structurally excluded from subagents anyway; belt and suspenders
@@ -92,6 +102,20 @@ export default function (pi: ExtensionAPI) {
       name: Type.Optional(Type.String({ description: "Short display name for this run" })),
       background: Type.Optional(Type.Boolean({ description: "Run in background; result is delivered on completion" })),
     }),
+    renderResult(result, opts, theme) {
+      const d = (result.details ?? {}) as Partial<RunSummary> & { structured?: { status?: string } };
+      const glyph = ROLE_GLYPH[d.role ?? ""] ?? "✧";
+      const status = d.structured?.status ? ` · ${d.structured.status}` : "";
+      const header =
+        theme.fg("accent", `${glyph} ${d.name ?? "agent"}`) +
+        theme.fg("dim", ` [${d.role}·${d.model}] · t${d.turns ?? 0} · ${fmtTokens(d.tokens ?? 0)} tok · ${fmtUsd(d.costUsd ?? 0)}${status}`);
+      const expanded = (opts as { expanded?: boolean })?.expanded;
+      if (!expanded) return new Text(header, 0, 0);
+      const body = (result.content ?? [])
+        .map((c) => (c as { text?: string }).text ?? "")
+        .join("\n");
+      return new Text(`${header}\n${theme.fg("text", body)}`, 0, 0);
+    },
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       cfg = loadFairyTalesConfig(ctx.cwd);
       const { id, promise } = runner.spawn({

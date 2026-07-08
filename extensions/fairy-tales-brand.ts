@@ -31,6 +31,11 @@ function themeForHour(hour: number): string {
   return hour >= 7 && hour < 19 ? "fairy-tales-dawn" : "fairy-tales";
 }
 
+/** Tell the masthead renderer which gradient to use (dark vs light ground). */
+function markDawn(themeName: string): void {
+  (globalThis as Record<string, unknown>).__fairyTalesDawn = themeName === "fairy-tales-dawn";
+}
+
 export default function (pi: ExtensionAPI) {
   if (isNested()) return;
 
@@ -63,6 +68,7 @@ export default function (pi: ExtensionAPI) {
         await saveUserConfig({ ui: { previousTheme: current } });
       }
       const wanted = themeForHour(new Date().getHours());
+      markDawn(wanted);
       if (current !== wanted) {
         ctx.ui.setTheme(wanted);
       }

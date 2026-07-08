@@ -33,21 +33,38 @@ const LETTERS: string[] = [
 ];
 const ART_WIDTH = LETTERS[0].length;
 
-// Sunset gradient, one stop per lettering row (starlight → gold → ember → rose).
-const GRADIENT: Array<[number, number, number]> = [
+// Twilight sunset gradient (dark theme): starlight → gold → ember → rose.
+const GRADIENT_DUSK: Array<[number, number, number]> = [
   [255, 233, 163],
   [255, 215, 0],
   [255, 184, 107],
   [255, 158, 158],
   [255, 126, 182],
 ];
+// Dawn gradient (light parchment theme): deeper gilt → rose so it reads on a
+// pale ground instead of washing out.
+const GRADIENT_DAWN: Array<[number, number, number]> = [
+  [176, 122, 0],
+  [160, 109, 0],
+  [184, 92, 30],
+  [176, 49, 109],
+  [140, 30, 90],
+];
+
+/** The brand extension sets this when the light dawn theme is active. */
+function gradient(): Array<[number, number, number]> {
+  return (globalThis as Record<string, unknown>).__fairyTalesDawn ? GRADIENT_DAWN : GRADIENT_DUSK;
+}
+function dawn(): boolean {
+  return !!(globalThis as Record<string, unknown>).__fairyTalesDawn;
+}
 
 const BOLD = "\x1b[1m";
 const ITALIC = "\x1b[3m";
 const RESET = "\x1b[0m";
 const rgb = (r: number, g: number, b: number, s: string) => `\x1b[38;2;${r};${g};${b}m${s}${RESET}`;
-const LAVENDER = (s: string) => rgb(157, 146, 194, s);
-const MOON = (s: string) => rgb(242, 233, 220, s);
+const LAVENDER = (s: string) => (dawn() ? rgb(109, 79, 194, s) : rgb(157, 146, 194, s));
+const MOON = (s: string) => (dawn() ? rgb(90, 70, 40, s) : rgb(242, 233, 220, s));
 
 const SUBTITLE = "once upon a terminal";
 
@@ -58,8 +75,9 @@ function center(s: string, visible: number, width: number): string {
 /** Render the masthead for the given width; falls back to a compact banner
  *  on narrow terminals. Returns fully colored lines. */
 export function renderMasthead(_t: ThemeLike, width: number): string[] {
-  const [r1, g1, b1] = GRADIENT[0];
-  const [r5, g5, b5] = GRADIENT[GRADIENT.length - 1];
+  const grad = gradient();
+  const [r1, g1, b1] = grad[0];
+  const [r5, g5, b5] = grad[grad.length - 1];
 
   if (width < ART_WIDTH + 2) {
     const title = "F A I R Y   T A L E S";
@@ -81,7 +99,7 @@ export function renderMasthead(_t: ThemeLike, width: number): string[] {
 
   const lines: string[] = [sky];
   LETTERS.forEach((row, i) => {
-    const [r, g, b] = GRADIENT[i];
+    const [r, g, b] = grad[i];
     lines.push(" ".repeat(pad) + rgb(r, g, b, BOLD + row));
   });
 

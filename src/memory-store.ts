@@ -1,5 +1,5 @@
 /** File-based persistent memory: MEMORY.md index + topics/*.md detail files. */
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { appendFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
@@ -37,6 +37,18 @@ export class MemoryStore {
     } catch (err) {
       debug("memory", `failed to read index at ${this.indexPath}`, err);
       return undefined;
+    }
+  }
+
+  /** Topic slugs that have a file (for autocomplete/recall). */
+  listTopics(): string[] {
+    try {
+      if (!existsSync(this.topicsDir)) return [];
+      return readdirSync(this.topicsDir)
+        .filter((f) => f.endsWith(".md"))
+        .map((f) => f.replace(/\.md$/, ""));
+    } catch {
+      return [];
     }
   }
 
