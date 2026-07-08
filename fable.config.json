@@ -1,0 +1,55 @@
+{
+  "tiers": {
+    "scout": { "model": "deepseek-openai/deepseek-v4-flash", "thinkingLevel": "low" },
+    "worker": { "model": "openai-codex/gpt-5.4-mini", "thinkingLevel": "medium" },
+    "brain": { "model": "deepseek-openai/deepseek-v4-pro", "thinkingLevel": "high" }
+  },
+  "agents": {
+    "maxConcurrent": 3,
+    "maxTurnsPerRun": 30,
+    "maxCostPerRunUsd": 1.5,
+    "roles": {
+      "explore": {
+        "tier": "scout",
+        "tools": ["read", "grep", "find", "ls", "bash"],
+        "description": "Fast read-only codebase scout. Use for searching, mapping, and answering questions about code."
+      },
+      "plan": {
+        "tier": "brain",
+        "tools": ["read", "grep", "find", "ls", "bash"],
+        "description": "Software architect. Designs implementation plans, weighs trade-offs. Read-only."
+      },
+      "build": {
+        "tier": "worker",
+        "tools": ["read", "bash", "edit", "write", "grep", "find", "ls"],
+        "description": "Implementer. Executes a well-specified coding task and verifies it."
+      },
+      "review": {
+        "tier": "brain",
+        "tools": ["read", "grep", "find", "ls", "bash"],
+        "description": "Code reviewer. Finds bugs, risks, and design issues. Read-only."
+      },
+      "general": {
+        "tier": "worker",
+        "tools": ["read", "bash", "edit", "write", "grep", "find", "ls", "fetch"],
+        "description": "General-purpose agent for multi-step tasks that fit no other role."
+      }
+    }
+  },
+  "memory": { "dir": "~/.pi/agent/memory", "injectIndex": true },
+  "plans": { "dir": "~/.pi/agent/plans" },
+  "hooks": {
+    "bash": [
+      { "pattern": "rm\\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)[a-zA-Z]*\\s+(/|~|\\$HOME)\\s*$", "action": "block", "reason": "refusing recursive force-delete of root or home" },
+      { "pattern": "git\\s+push\\s+[^\\n]*--force(?!-with-lease)", "action": "confirm", "reason": "force push" },
+      { "pattern": "curl[^|;&]*\\|\\s*(ba|z)?sh", "action": "confirm", "reason": "piping remote script to shell" },
+      { "pattern": "git\\s+reset\\s+--hard", "action": "confirm", "reason": "discards local changes" }
+    ],
+    "paths": [
+      { "glob": "**/.env*", "action": "block", "reason": "no writes to env files" },
+      { "glob": "**/.git/**", "action": "block", "reason": "no direct writes inside .git" }
+    ],
+    "postEdit": { "testCommandFile": ".pi/test-command", "enabled": true, "timeoutMs": 120000 }
+  },
+  "web": { "timeoutMs": 20000, "maxBytes": 51200 }
+}
