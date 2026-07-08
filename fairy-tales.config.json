@@ -1,8 +1,8 @@
 {
   "tiers": {
-    "scout": { "model": "deepseek-openai/deepseek-v4-flash", "thinkingLevel": "low" },
-    "worker": { "model": "openai-codex/gpt-5.4-mini", "thinkingLevel": "medium" },
-    "brain": { "model": "deepseek-openai/deepseek-v4-pro", "thinkingLevel": "high" }
+    "scout": { "model": "zai/glm-5.2", "thinkingLevel": "low" },
+    "worker": { "model": "zai/glm-5.2", "thinkingLevel": "medium" },
+    "brain": { "model": "zai/glm-5.2", "thinkingLevel": "high" }
   },
   "agents": {
     "maxConcurrent": 5,
