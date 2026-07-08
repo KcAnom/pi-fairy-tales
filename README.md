@@ -26,6 +26,7 @@ Local packages load in place: edit any file here and `/reload` inside pi picks i
 | `fetch` tool | URL → readable text (HTML stripped), 20s timeout, 50KB cap. |
 | Skills | `deep-review` (parallel multi-agent review with verification), `handoff` (session handoff doc), `ship` (verify → commit → report). |
 | Prompts | `/commit`, `/review`, `/plan-task`, `/standup` — see `prompts/`. |
+| `/grimoire` | Browse installed skills, prompts, extensions, and themes in a book overlay. Pairs with pi's `quietStartup: true` setting (enabled) so startup is clean instead of listing everything. Works in plain pi and ftales. |
 
 ## Configuration
 
