@@ -29,13 +29,28 @@ export default function (pi: ExtensionAPI) {
     (usd) => pi.events.emit(COST_ADD, { usd }),
   );
 
+  // The Fae Council: storybook identities for subagent roles, ftales-only.
+  const FAE: Record<string, string> | undefined =
+    process.env.FTALES === "1"
+      ? {
+          explore: "🕯 Will-o'-Wisp",
+          plan: "✶ the Sage",
+          build: "⚒ the Smith",
+          review: "🪶 the Raven",
+          general: "🜍 the Wanderer",
+        }
+      : undefined;
+
+  const roleLabel = (role: string) => FAE?.[role] ?? role;
+
   const updateWidget = (all: RunSummary[]) => {
     if (!uiRef?.hasUI) return;
     try {
       const active = all.filter((r) => r.state === "running");
       const lines = active.map((r) => {
         const secs = fmtDuration(Date.now() - r.startedAt);
-        return ` ◐ ${r.name} [${r.role}·${r.model}] ${r.lastActivity} · t${r.turns} · ${fmtUsd(r.costUsd)} · ${secs}`;
+        const mark = FAE ? "✧" : "◐";
+        return ` ${mark} ${roleLabel(r.role)} · ${r.name} [${r.model}] ${r.lastActivity} · t${r.turns} · ${fmtUsd(r.costUsd)} · ${secs}`;
       });
       uiRef.ui.setWidget("fairy-tales-agents", lines.length ? lines : undefined, { placement: "aboveEditor" });
     } catch {

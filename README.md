@@ -53,6 +53,11 @@ Defaults ship in [`fairy-tales.config.json`](fairy-tales.config.json). Override 
 - a "✧ F A I R Y  T A L E S ✧ — once upon a terminal" startup header
 - terminal title `✦ Fairy Tales — <project>`
 - a drifting-sparkle working indicator
+- **day/night enchantment**: parchment `fairy-tales-dawn` theme 07:00-18:59, twilight `fairy-tales` at night
+- **the Enchanted Footer**: `✦ model · ⚘ realm (git branch) · ✒ ink N% (context left) · 🜚 gold (session cost) · ✧ sprites at work`
+- **the Fae Council**: subagents appear as 🕯 Will-o'-Wisp (explore), ✶ the Sage (plan), ⚒ the Smith (build), 🪶 the Raven (review), 🜍 the Wanderer (general); finishing every todo triggers "✦ Quest complete ✦"
+- **`/tale`**: the session retold as a true storybook chapter ("Once upon a terminal…") in a book overlay — a narrative recap
+- **a sparkle title screen** on launch, and sessions auto-named like chapters ("The Tale of …")
 
 Plain `pi` stays completely unbranded. pi persists theme switches to settings.json, so the brand extension records your previous theme in `~/.pi/agent/fairy-tales.json` when `ftales` starts, and the next plain `pi` session automatically switches back. All other harness features (subagents, memory, hooks…) are identical in both.
 

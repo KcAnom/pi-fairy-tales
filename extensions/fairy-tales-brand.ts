@@ -23,6 +23,13 @@ function settingsTheme(): string | undefined {
   }
 }
 
+const isFairyTheme = (name?: string) => !!name && name.startsWith("fairy-tales");
+
+/** Day/night enchantment: parchment dawn theme 07:00–18:59, twilight otherwise. */
+function themeForHour(hour: number): string {
+  return hour >= 7 && hour < 19 ? "fairy-tales-dawn" : "fairy-tales";
+}
+
 export default function (pi: ExtensionAPI) {
   if (isNested()) return;
 
@@ -34,7 +41,7 @@ export default function (pi: ExtensionAPI) {
       try {
         const cfg = loadFairyTalesConfig(ctx.cwd) as { ui?: { previousTheme?: string } };
         const previous = cfg.ui?.previousTheme;
-        if (previous && previous !== "fairy-tales" && settingsTheme() === "fairy-tales") {
+        if (previous && !isFairyTheme(previous) && isFairyTheme(settingsTheme())) {
           ctx.ui.setTheme(previous);
         }
       } catch {
@@ -48,13 +55,15 @@ export default function (pi: ExtensionAPI) {
     if (!ctx.hasUI) return;
 
     // Theme: remember what the user had, then switch (setTheme persists).
+    // Day/night enchantment picks the twilight or dawn variant by local hour.
     try {
       const current = settingsTheme();
-      if (current && current !== "fairy-tales") {
+      if (current && !isFairyTheme(current)) {
         await saveUserConfig({ ui: { previousTheme: current } });
       }
-      if (current !== "fairy-tales") {
-        ctx.ui.setTheme("fairy-tales");
+      const wanted = themeForHour(new Date().getHours());
+      if (current !== wanted) {
+        ctx.ui.setTheme(wanted);
       }
     } catch {
       // theme missing — banner and title still apply

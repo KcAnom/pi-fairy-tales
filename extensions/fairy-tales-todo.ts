@@ -57,11 +57,22 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const wasUnfinished = todos.length > 0 && todos.some((t) => t.status !== "done");
       if (params.action === "write") {
         if (!params.items) throw new Error("todo write requires items");
         todos = params.items;
       }
       updateWidget(ctx);
+      // Quest complete celebration (ftales only): the whole list just turned done.
+      if (
+        process.env.FTALES === "1" &&
+        ctx.hasUI &&
+        wasUnfinished &&
+        todos.length > 0 &&
+        todos.every((t) => t.status === "done")
+      ) {
+        ctx.ui.notify("✦ Quest complete — every trial overcome ✦", "info");
+      }
       const body = todos.length ? renderLines(todos).join("\n") : "(todo list empty)";
       return {
         content: [{ type: "text", text: body }],
