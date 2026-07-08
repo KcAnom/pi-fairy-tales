@@ -21,13 +21,13 @@ export interface ThemeLike {
   bold(text: string): string;
 }
 
-// Block lettering split into [Fairy, Tales] halves so each word gets its own color.
+// Solid block lettering split into [FAIRY, TALES] halves so each word gets its own color.
 const LETTERS: Array<[string, string]> = [
-  ["  ___     _           ", "  _____     _        "],
-  [" | __|_ _(_)_ _ _  _  ", " |_   _|_ _| |___ ___"],
-  [" | _/ _` | | '_| || | ", "   | |/ _` | / -_|_-<"],
-  [" |_|\\__,_|_|_|  \\_, | ", "   |_|\\__,_|_\\___/__/"],
-  ["                |__/  ", "                     "],
+  ["█████  ███  █████ ████  █   █", "   █████  ███  █     █████  ████"],
+  ["█     █   █   █   █   █  █ █ ", "     █   █   █ █     █     █    "],
+  ["████  █████   █   ████    █  ", "     █   █████ █     ████   ███ "],
+  ["█     █   █   █   █  █    █  ", "     █   █   █ █     █         █"],
+  ["█     █   █ █████ █   █   █  ", "     █   █   █ █████ █████ ████ "],
 ];
 
 const ART_WIDTH = LETTERS[0][0].length + LETTERS[0][1].length;
