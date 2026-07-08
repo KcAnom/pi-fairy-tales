@@ -4,11 +4,34 @@ A Fairy-Tales-class harness for the [pi coding agent](https://github.com/earendi
 
 ## Install
 
+On a fresh machine (yours or anyone's):
+
 ```bash
-pi install ~/pi-fairy-tales
+npm i -g @earendil-works/pi-coding-agent        # 1. pi itself
+pi install git:github.com/KcAnom/pi-fairy-tales  # 2. this package
 ```
 
-Local packages load in place: edit any file here and `/reload` inside pi picks it up. Remove with `pi remove ~/pi-fairy-tales`.
+Then create the `ftales` launcher (or clone the repo and run `./install.sh`, which does both steps):
+
+```bash
+mkdir -p ~/bin && printf '#!/bin/sh\nexport FTALES=1\nexec pi "$@"\n' > ~/bin/ftales && chmod +x ~/bin/ftales
+```
+
+For local development instead: clone anywhere and `pi install /path/to/pi-fairy-tales` — local packages load in place, so edit + `/reload` inside pi picks changes up. Remove with `pi remove <source>`.
+
+**Bring your own models.** Nothing personal ships in this package — API keys live in your own `~/.pi/agent/auth.json` (log in with `/login` inside pi), and the default subagent tiers reference models you may not have. Point the tiers at whatever you use by creating `~/.pi/agent/fairy-tales.json`:
+
+```json
+{
+  "tiers": {
+    "scout":  { "model": "your-provider/cheap-model",  "thinkingLevel": "low" },
+    "worker": { "model": "your-provider/main-model",   "thinkingLevel": "medium" },
+    "brain":  { "model": "your-provider/best-model",   "thinkingLevel": "high" }
+  }
+}
+```
+
+Or skip tiers entirely: run `/agent-model` inside pi and pick "Single — follow my session model". If a tier model is unavailable, subagents automatically fall back to your session model with a visible warning — nothing breaks.
 
 ## What you get
 
