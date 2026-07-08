@@ -1,4 +1,6 @@
 /** Rule evaluation for the fairy-tales hook engine. */
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import type { BashRule, PathRule } from "./config.ts";
 import { pathMatches } from "./glob.ts";
 
@@ -7,17 +9,65 @@ export interface RuleVerdict {
   reason: string;
 }
 
+/**
+ * Normalize a command so trivial evasions (quotes, $HOME/~ expansion) don't slip
+ * past regex rules. Defense-in-depth, not a sandbox — we match rules against BOTH
+ * the raw and normalized forms.
+ */
+export function normalizeCommand(command: string): string {
+  return command
+    .replace(/\\(["'])/g, "$1") // unescape escaped quotes
+    .replace(/["']/g, "") // drop quotes: r""m -> rm
+    .replace(/\$\{HOME\}|\$HOME|(?<=^|\s)~(?=\/|\s|$)/g, homedir())
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function checkBashCommand(rules: BashRule[], command: string): RuleVerdict | undefined {
+  const forms = [command, normalizeCommand(command)];
   for (const rule of rules ?? []) {
+    let re: RegExp;
     try {
-      if (new RegExp(rule.pattern, "i").test(command)) {
-        return { action: rule.action, reason: rule.reason ?? `matched rule: ${rule.pattern}` };
-      }
+      re = new RegExp(rule.pattern, "i");
     } catch {
-      // invalid user regex — skip, never brick tool calls
+      continue; // invalid user regex — skip, never brick tool calls
+    }
+    if (forms.some((f) => re.test(f))) {
+      return { action: rule.action, reason: rule.reason ?? `matched rule: ${rule.pattern}` };
     }
   }
   return undefined;
+}
+
+/**
+ * Best-effort extraction of filesystem paths a bash command writes to:
+ * output redirects, cp/mv/install destinations, tee/dd targets, sed -i files.
+ * Returned as absolute paths (resolved against cwd) so path rules can catch
+ * bash-mediated writes that never touch the write/edit tools.
+ */
+export function extractBashWriteTargets(command: string, cwd: string): string[] {
+  const norm = normalizeCommand(command);
+  const targets = new Set<string>();
+  const add = (p: string | undefined) => {
+    if (p && !p.startsWith("-") && !p.startsWith("/dev/") && p !== "&2" && p !== "&1") {
+      targets.add(resolve(cwd, p));
+    }
+  };
+
+  // Redirects: > file, >> file, N> file (skip >&2 / >&1)
+  for (const m of norm.matchAll(/(?:^|\s)\d*>>?\s*([^\s|&;<>]+)/g)) add(m[1]);
+  // tee [-a] file...
+  for (const m of norm.matchAll(/\btee\b\s+(?:-a\s+)?([^\s|&;<>]+)/g)) add(m[1]);
+  // dd of=file
+  for (const m of norm.matchAll(/\bdd\b[^|;&]*\bof=([^\s|&;<>]+)/g)) add(m[1]);
+  // sed -i ... file (last token of the segment)
+  for (const m of norm.matchAll(/\bsed\b\s+-[a-z]*i[a-z]*\s+.*?([^\s|&;<>]+)\s*$/gim)) add(m[1]);
+  // cp/mv/install/ln SRC... DEST  (destination is the last token)
+  for (const m of norm.matchAll(/\b(?:cp|mv|install|ln)\b\s+([^|;&]+)/g)) {
+    const parts = m[1].trim().split(/\s+/).filter((t) => !t.startsWith("-"));
+    if (parts.length >= 2) add(parts[parts.length - 1]);
+  }
+  return [...targets];
 }
 
 export function checkPath(rules: PathRule[], path: string): RuleVerdict | undefined {

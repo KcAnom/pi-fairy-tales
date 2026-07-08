@@ -17,9 +17,10 @@ import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import { loadFairyTalesConfig, type FairyTalesConfig } from "../src/config.ts";
-import { checkBashCommand, checkPath, isMutatingBash } from "../src/rules.ts";
+import { checkBashCommand, checkPath, isMutatingBash, extractBashWriteTargets } from "../src/rules.ts";
 import { PLAN_CHANGED, type PlanChangedPayload } from "../src/bus.ts";
 import { clipTail } from "../src/text.ts";
+import { debug } from "../src/util.ts";
 
 const FILE_TOOLS = ["write", "edit"] as const;
 
@@ -28,6 +29,7 @@ export default function (pi: ExtensionAPI) {
   let planActive = false;
   let touchedFiles = new Set<string>();
   let testRunning = false;
+  let rerunPending = false;
 
   pi.events.on(PLAN_CHANGED, (data: PlanChangedPayload) => {
     planActive = !!data?.active;
@@ -62,6 +64,21 @@ export default function (pi: ExtensionAPI) {
         const ok = await ctx.ui.confirm("Fairy-Tales guard", `${verdict.reason}\n\n${command}\n\nAllow?`);
         if (!ok) return { block: true, reason: `User denied: ${verdict.reason}` };
       }
+
+      // Bash-mediated writes (echo > .env, cp key .git/config, tee, dd of=…)
+      // bypass the write/edit path rules entirely — check their targets too.
+      const writeTargets = extractBashWriteTargets(command, ctx.cwd);
+      for (const target of writeTargets) {
+        const pv = checkPath(cfg.hooks.paths, target);
+        if (pv) {
+          debug("hooks", `bash write to guarded path: ${target}`);
+          if (pv.action === "block" || !ctx.hasUI) {
+            return { block: true, reason: `Blocked by fairy-tales path rule: ${pv.reason} (${target}, via bash)` };
+          }
+          const ok = await ctx.ui.confirm("Fairy-Tales guard", `${pv.reason}\n\n${target}\n\nAllow write via bash?`);
+          if (!ok) return { block: true, reason: `User denied: ${pv.reason}` };
+        }
+      }
       return;
     }
 
@@ -87,10 +104,16 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("tool_result", async (event, ctx) => {
     // Track successfully modified files for the post-edit test hook.
-    if (!event.isError && (FILE_TOOLS as readonly string[]).includes(event.toolName)) {
+    if (event.isError) return;
+    if ((FILE_TOOLS as readonly string[]).includes(event.toolName)) {
       const path = (event.input as { path?: string }).path;
       if (path) touchedFiles.add(resolve(ctx.cwd, path));
+    } else if (event.toolName === "bash") {
+      for (const t of extractBashWriteTargets((event.input as { command?: string }).command ?? "", ctx.cwd)) {
+        touchedFiles.add(t);
+      }
     }
+    if (touchedFiles.size && testRunning) rerunPending = true;
   });
 
   pi.on("turn_end", async (_event, ctx) => {
@@ -108,40 +131,46 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
+    void runTests(ctx, testCmd);
+  });
+
+  // Run detached so a slow test suite never stalls the agent loop; failures are
+  // steered back for the model to fix. Edits that land mid-run set rerunPending,
+  // and we test the union afterward so nothing slips through.
+  async function runTests(
+    ctx: { hasUI: boolean; cwd: string; ui: { setStatus(k: string, t?: string): void; notify(m: string, l?: string): void } },
+    testCmd: string,
+  ): Promise<void> {
     const files = [...touchedFiles];
     touchedFiles = new Set();
     testRunning = true;
-
+    rerunPending = false;
     if (ctx.hasUI) ctx.ui.setStatus("fairy-tales-tests", "⏳ tests");
-
-    // Run detached so a slow test suite never stalls the agent loop; failures
-    // are steered back into the conversation for the model to fix.
-    void (async () => {
-      try {
-        const result = await pi.exec("sh", ["-c", testCmd], {
-          timeout: cfg!.hooks.postEdit.timeoutMs ?? 120000,
-        });
-        if (result.code !== 0) {
-          const output = clipTail(`${result.stdout}\n${result.stderr}`.trim(), 16384, 400);
-          pi.sendMessage(
-            {
-              customType: "fairy-tales-hook",
-              content:
-                `Post-edit test hook failed (exit ${result.code}) after editing: ${files.join(", ")}\n` +
-                `Command: ${testCmd}\n\n${output}\n\nFix the failures.`,
-              display: true,
-            },
-            { deliverAs: "steer", triggerTurn: true },
-          );
-        } else if (ctx.hasUI) {
-          ctx.ui.notify(`✓ post-edit tests passed (${testCmd})`, "info");
-        }
-      } catch (err) {
-        if (ctx.hasUI) ctx.ui.notify(`post-edit test hook error: ${String(err)}`, "error");
-      } finally {
-        testRunning = false;
-        if (ctx.hasUI) ctx.ui.setStatus("fairy-tales-tests", undefined);
+    try {
+      const result = await pi.exec("sh", ["-c", testCmd], { timeout: cfg!.hooks.postEdit.timeoutMs ?? 120000 });
+      if (result.code !== 0) {
+        const output = clipTail(`${result.stdout}\n${result.stderr}`.trim(), 16384, 400);
+        pi.sendMessage(
+          {
+            customType: "fairy-tales-hook",
+            content:
+              `Post-edit test hook failed (exit ${result.code}) after editing: ${files.join(", ")}\n` +
+              `Command: ${testCmd}\n\n${output}\n\nFix the failures.`,
+            display: true,
+          },
+          { deliverAs: "steer", triggerTurn: true },
+        );
+      } else if (ctx.hasUI) {
+        ctx.ui.notify(`✓ post-edit tests passed (${testCmd})`, "info");
       }
-    })();
-  });
+    } catch (err) {
+      debug("hooks", "post-edit test error", err);
+      if (ctx.hasUI) ctx.ui.notify(`post-edit test hook error: ${String(err)}`, "error");
+    } finally {
+      testRunning = false;
+      if (ctx.hasUI) ctx.ui.setStatus("fairy-tales-tests", undefined);
+      // Edits arrived while tests ran — re-run against the union.
+      if (rerunPending && touchedFiles.size) await runTests(ctx, testCmd);
+    }
+  }
 }

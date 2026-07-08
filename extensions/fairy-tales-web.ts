@@ -7,6 +7,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { loadFairyTalesConfig } from "../src/config.ts";
 import { clipHead } from "../src/text.ts";
+import { safeFetch } from "../src/net.ts";
 
 function htmlToText(html: string): string {
   return html
@@ -52,16 +53,18 @@ export default function (pi: ExtensionAPI) {
       const timeout = AbortSignal.timeout(cfg.web.timeoutMs);
       const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
 
-      const res = await fetch(url, {
+      // Cap the download at 2× maxBytes of raw bytes; text is clipped after.
+      const res = await safeFetch(url, {
         signal: combined,
-        redirect: "follow",
-        headers: { "user-agent": "pi-fairy-tales/0.1 (+pi coding agent)", accept: "text/html,text/plain,application/json;q=0.9,*/*;q=0.8" },
+        maxBytes: Math.max(cfg.web.maxBytes * 2, 131072),
+        blockPrivate: cfg.web.blockPrivateHosts !== false,
+        headers: {
+          "user-agent": "pi-fairy-tales/0.2 (+pi coding agent)",
+          accept: "text/html,text/plain,application/json;q=0.9,*/*;q=0.8",
+        },
       });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status} ${res.statusText} for ${url}`);
-      }
       const contentType = res.headers.get("content-type") ?? "";
-      const body = await res.text();
+      const body = res.text;
 
       let text: string;
       if (params.mode === "raw") {
@@ -74,7 +77,7 @@ export default function (pi: ExtensionAPI) {
 
       return {
         content: [{ type: "text", text: clipHead(text, cfg.web.maxBytes, 2000) }],
-        details: { url, status: res.status, contentType, bytes: body.length },
+        details: { url: res.finalUrl, status: res.status, contentType, bytes: body.length, capped: res.truncated },
       };
     },
   });

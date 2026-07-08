@@ -42,7 +42,7 @@
   "plans": { "dir": "~/.pi/agent/plans" },
   "hooks": {
     "bash": [
-      { "pattern": "rm\\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)[a-zA-Z]*\\s+(/|~|\\$HOME)\\s*$", "action": "block", "reason": "refusing recursive force-delete of root or home" },
+      { "pattern": "rm\\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)[a-zA-Z]*\\s+(/|~|\\$HOME|\\$\\{HOME\\})(\\s|/|\\*|$)", "action": "block", "reason": "refusing recursive force-delete of root or home" },
       { "pattern": "git\\s+push\\s+[^\\n]*--force(?!-with-lease)", "action": "confirm", "reason": "force push" },
       { "pattern": "curl[^|;&]*\\|\\s*(ba|z)?sh", "action": "confirm", "reason": "piping remote script to shell" },
       { "pattern": "git\\s+reset\\s+--hard", "action": "confirm", "reason": "discards local changes" }
@@ -53,5 +53,5 @@
     ],
     "postEdit": { "testCommandFile": ".pi/test-command", "enabled": true, "timeoutMs": 120000 }
   },
-  "web": { "timeoutMs": 20000, "maxBytes": 51200 }
+  "web": { "timeoutMs": 20000, "maxBytes": 51200, "blockPrivateHosts": true }
 }

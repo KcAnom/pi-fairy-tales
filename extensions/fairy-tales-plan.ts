@@ -24,11 +24,15 @@ const PLAN_ADDENDUM = `
 
 You are in plan mode: a read-only research and design phase.
 - Do NOT modify any files or system state. File-mutating tools are disabled and mutating bash commands are blocked.
+- Do NOT delegate to build/write subagents and do NOT save memories — plan mode is read-only end to end.
 - Explore the codebase, gather facts, and design an implementation approach.
 - When your plan is ready, call the exit_plan tool with the complete plan as markdown. Do not describe the plan in a normal reply instead of calling exit_plan.
 - If the user asks questions, answer them; stay in plan mode until exit_plan is accepted.`;
 
-const READONLY_KEEP = new Set(["read", "grep", "find", "ls", "bash", "fetch", "agent", "agent_control", "todo", "exit_plan", "remember"]);
+// Read-only tools kept active during plan mode. Deliberately EXCLUDES agent/
+// agent_control (a build subagent would carry write tools and bypass plan mode)
+// and remember (it writes MEMORY.md — a file mutation during "read-only").
+const READONLY_KEEP = new Set(["read", "grep", "find", "ls", "bash", "fetch", "todo", "exit_plan"]);
 
 export default function (pi: ExtensionAPI) {
   let active = false;
@@ -124,9 +128,11 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (event, ctx) => {
     if (isNested()) return;
-    // Rebuild plan state from the session (restart/resume survival).
+    // Rebuild plan state from the CURRENT BRANCH (not all entries) so forking off
+    // a pre-plan point doesn't resurrect plan mode from a different branch.
     let last: { active?: boolean; savedTools?: string[] } | undefined;
-    for (const entry of ctx.sessionManager.getEntries()) {
+    const entries = ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries();
+    for (const entry of entries) {
       if (entry.type === "custom" && (entry as { customType?: string }).customType === "fairy-tales-plan") {
         last = (entry as { data?: { active?: boolean; savedTools?: string[] } }).data;
       }
