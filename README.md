@@ -1,6 +1,8 @@
 # pi-fairy-tales
 
-A Fairy-Tales-class harness for the [pi coding agent](https://github.com/earendil-works/pi-mono): subagent orchestration, persistent memory, plan mode, guard-rail hooks, todo tracking, smart compaction, a live status line, and web fetch — as one local pi package.
+A Fairy-Tales-class harness for the [pi coding agent](https://github.com/earendil-works/pi-mono): subagent orchestration, persistent memory, plan mode, guard-rail hooks, todo tracking, smart compaction, a live status line, and web fetch — as one pi package.
+
+**Docs:** [Setup Guide](docs/SETUP.md) (step-by-step, agent-executable) · [Configuration Reference](docs/CONFIGURATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Changelog](CHANGELOG.md) · [AGENTS.md](AGENTS.md) (for coding agents working on this repo)
 
 ## Install
 
