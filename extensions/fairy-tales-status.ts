@@ -5,9 +5,14 @@
  * emitted by the subagent engine.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { isNested } from "../src/config.ts";
+import { isNested, loadFairyTalesConfig, loadDiagnostics } from "../src/config.ts";
 import { AGENTS_STATUS, COST_ADD, type AgentsStatusPayload, type CostAddPayload } from "../src/bus.ts";
 import { fmtUsd } from "../src/text.ts";
+import { estimateCostUsd } from "../src/util.ts";
+
+// The enchanted footer (ftales only) owns the vitals; the plain status segment
+// stands down so the two never compute cost/agents independently and disagree.
+const FOOTER_OWNS_VITALS = process.env.FTALES === "1";
 
 export default function (pi: ExtensionAPI) {
   if (isNested()) return; // no UI inside subagents
@@ -19,7 +24,7 @@ export default function (pi: ExtensionAPI) {
   let render: (() => void) | undefined;
 
   const update = (ctx: { ui: { setStatus(key: string, text?: string): void }; hasUI: boolean }) => {
-    if (!ctx.hasUI) return;
+    if (!ctx.hasUI || FOOTER_OWNS_VITALS) return;
     const parts: string[] = [];
     if (modelName) parts.push(modelName);
     if (contextPct !== undefined) parts.push(`ctx ${contextPct}%`);
@@ -32,6 +37,11 @@ export default function (pi: ExtensionAPI) {
     modelName = (ctx.model as { id?: string } | undefined)?.id ?? "";
     render = () => update(ctx);
     update(ctx);
+    // Surface config problems (unknown tier, dropped guard, parse error) once.
+    loadFairyTalesConfig(ctx.cwd);
+    if (ctx.hasUI && loadDiagnostics.length) {
+      for (const d of loadDiagnostics.slice(0, 4)) ctx.ui.notify(`⚠ fairy-tales config: ${d}`, "warning");
+    }
   });
 
   pi.on("model_select", async (event, ctx) => {
@@ -40,9 +50,13 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("message_end", async (event, ctx) => {
-    const msg = event.message as { role?: string; usage?: { cost?: { total?: number } } };
-    if (msg.role === "assistant" && msg.usage?.cost?.total) {
-      costUsd += msg.usage.cost.total;
+    const msg = event.message as {
+      role?: string;
+      usage?: { cost?: { total?: number }; input?: number; output?: number };
+    };
+    if (msg.role === "assistant" && msg.usage) {
+      const reported = msg.usage.cost?.total ?? 0;
+      costUsd += reported > 0 ? reported : estimateCostUsd(msg.usage.input ?? 0, msg.usage.output ?? 0);
       update(ctx);
     }
   });

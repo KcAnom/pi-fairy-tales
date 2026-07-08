@@ -2,7 +2,7 @@
  * Fairy-Tales config: shipped defaults (fairy-tales.config.json in this package) deep-merged with
  * ~/.pi/agent/fairy-tales.json (user) and <cwd>/.pi/fairy-tales.json (project). Later wins.
  */
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,9 +48,17 @@ export interface FairyTalesConfig {
   hooks: {
     bash: BashRule[];
     paths: PathRule[];
+    /** Appended onto (not replacing) the shipped bash rules — the safe way to add rules. */
+    bashAppend?: BashRule[];
+    /** Appended onto (not replacing) the shipped path rules. */
+    pathsAppend?: PathRule[];
     postEdit: { testCommandFile: string; enabled: boolean; timeoutMs?: number };
   };
-  web: { timeoutMs: number; maxBytes: number };
+  web: { timeoutMs: number; maxBytes: number; blockPrivateHosts?: boolean };
+  /** Optional compaction summarizer tier (falls back to the lead model). */
+  compaction?: { tier?: string; proactiveAtPercent?: number };
+  /** Internal UI state persisted by the brand extension (previousTheme, etc.). */
+  ui?: { previousTheme?: string };
 }
 
 export function expandHome(p: string): string {
@@ -87,12 +95,84 @@ export const loadDiagnostics: string[] = [];
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+function mtimeOf(path: string): number {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+interface CacheEntry {
+  key: string;
+  cfg: FairyTalesConfig;
+  diagnostics: string[];
+}
+const cache = new Map<string, CacheEntry>();
+
+/** Concatenate shipped defaults with `<name>Append` overrides for rule arrays. */
+function applyAppends(cfg: FairyTalesConfig): void {
+  const h = cfg.hooks;
+  if (h?.bashAppend?.length) h.bash = [...(h.bash ?? []), ...h.bashAppend];
+  if (h?.pathsAppend?.length) h.paths = [...(h.paths ?? []), ...h.pathsAppend];
+}
+
+/** Validate the merged config; push human-readable problems into `diagnostics`. */
+function validate(cfg: FairyTalesConfig, defaults: FairyTalesConfig, diagnostics: string[]): void {
+  const tierNames = new Set(Object.keys(cfg.tiers ?? {}));
+  for (const [roleName, role] of Object.entries(cfg.agents?.roles ?? {})) {
+    if (role.tier && !tierNames.has(role.tier)) {
+      diagnostics.push(`role "${roleName}" references unknown tier "${role.tier}" (known: ${[...tierNames].join(", ")})`);
+    }
+  }
+  const mode = cfg.agents?.modelMode;
+  if (mode && mode !== "tiered" && mode !== "single") {
+    diagnostics.push(`agents.modelMode "${mode}" is invalid (use "tiered" or "single")`);
+  }
+  const single = cfg.agents?.singleModel;
+  if (mode === "single" && single && single !== "session" && !single.includes("/")) {
+    diagnostics.push(`agents.singleModel "${single}" should be "session" or "provider/model-id"`);
+  }
+  // Warn if a wholesale bash-rule override dropped the shipped safety guards.
+  const shippedGuards = (defaults.hooks?.bash ?? []).filter((r) => r.action === "block");
+  const activePatterns = new Set((cfg.hooks?.bash ?? []).map((r) => r.pattern));
+  for (const guard of shippedGuards) {
+    if (!activePatterns.has(guard.pattern)) {
+      diagnostics.push(
+        `hooks.bash override dropped the shipped guard for ${guard.reason ?? guard.pattern} — use hooks.bashAppend to add rules without replacing defaults`,
+      );
+    }
+  }
+}
+
 export function loadFairyTalesConfig(cwd: string): FairyTalesConfig {
+  const userPath = join(homedir(), ".pi", "agent", "fairy-tales.json");
+  const projectPath = join(cwd, ".pi", "fairy-tales.json");
+  const defaultsPath = join(packageRoot, "fairy-tales.config.json");
+  const key = [defaultsPath, userPath, projectPath].map(mtimeOf).join(":");
+
+  const hit = cache.get(cwd);
+  if (hit && hit.key === key) {
+    loadDiagnostics.length = 0;
+    loadDiagnostics.push(...hit.diagnostics);
+    return hit.cfg;
+  }
+
   loadDiagnostics.length = 0;
-  const defaults = readJson(join(packageRoot, "fairy-tales.config.json")) as unknown as FairyTalesConfig;
-  const user = readJson(join(homedir(), ".pi", "agent", "fairy-tales.json"));
-  const project = readJson(join(cwd, ".pi", "fairy-tales.json"));
-  return deepMerge(deepMerge(defaults, user as Partial<FairyTalesConfig>), project as Partial<FairyTalesConfig>);
+  const defaults = readJson(defaultsPath) as unknown as FairyTalesConfig;
+  const user = readJson(userPath);
+  const project = readJson(projectPath);
+  const cfg = deepMerge(deepMerge(defaults, user as Partial<FairyTalesConfig>), project as Partial<FairyTalesConfig>);
+  applyAppends(cfg);
+  validate(cfg, defaults, loadDiagnostics);
+
+  cache.set(cwd, { key, cfg, diagnostics: [...loadDiagnostics] });
+  return cfg;
+}
+
+/** The role names available for the `agent` tool, derived from config. */
+export function roleNames(cfg: FairyTalesConfig): string[] {
+  return Object.keys(cfg.agents?.roles ?? {});
 }
 
 /**

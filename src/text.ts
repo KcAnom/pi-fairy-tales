@@ -2,7 +2,9 @@
 import { truncateTail, truncateHead } from "@earendil-works/pi-coding-agent";
 
 export function fmtUsd(usd: number): string {
-  return usd >= 10 ? `$${usd.toFixed(0)}` : `$${usd.toFixed(2)}`;
+  // Always keep cents — spend precision matters most exactly where totals grow.
+  if (usd >= 1000) return `$${(usd / 1000).toFixed(2)}k`;
+  return `$${usd.toFixed(2)}`;
 }
 
 export function fmtDuration(ms: number): string {
