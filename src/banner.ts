@@ -21,42 +21,45 @@ export interface ThemeLike {
   bold(text: string): string;
 }
 
-// Solid block lettering split into [FAIRY, TALES] halves so each word gets its own color.
-const LETTERS: Array<[string, string]> = [
-  ["█████  ███  █████ ████  █   █", "   █████  ███  █     █████  ████"],
-  ["█     █   █   █   █   █  █ █ ", "     █   █   █ █     █     █    "],
-  ["████  █████   █   ████    █  ", "     █   █████ █     ████   ███ "],
-  ["█     █   █   █   █  █    █  ", "     █   █   █ █     █         █"],
-  ["█     █   █ █████ █   █   █  ", "     █   █   █ █████ █████ ████ "],
-];
+// The Runebound Cyber Gate (user design): full-bleed rune bars framing the
+// title between mint orbs over a slate dot-lattice.
+// Palette: Poison Ivy Mint + Neon Coral (design-fixed, not theme-mapped).
+const MINT = "\x1b[38;2;85;239;196m";
+const CORAL = "\x1b[38;2;255;118;117m";
+const SLATE = "\x1b[38;2;99;110;114m";
+const BOLD = "\x1b[1m";
+const RESET = "\x1b[0m";
 
-const ART_WIDTH = LETTERS[0][0].length + LETTERS[0][1].length;
-const DUST = "·  ✦    ·   ✧      ·      ✦    ·    ✧   ·";
-const SUBTITLE = "~ once upon a terminal ~";
+const TITLE = " F A I R Y   T A L E S ";
+const SUBTITLE = " ~ once upon a terminal ~ ";
+const ORB = "🔮"; // renders 2 cells wide
 
-function center(s: string, visible: number, width: number): string {
-  return " ".repeat(Math.max(0, Math.floor((width - visible) / 2))) + s;
+function runeBar(width: number): string {
+  // Alternating rune/dash, colored per glyph, built to exact cell count.
+  let bar = "";
+  for (let i = 0; i < width; i++) {
+    bar += i % 2 === 0 ? `${MINT}𐕣` : `${SLATE}─`;
+  }
+  return bar + RESET;
 }
 
-/** Render the masthead for the given width; falls back to the compact banner
- *  on narrow terminals. Returns fully colored lines. */
-export function renderMasthead(t: ThemeLike, width: number): string[] {
-  if (width < ART_WIDTH + 2) {
-    const title = "F A I R Y   T A L E S";
-    return [
-      center(t.fg("dim", DUST), DUST.length, width),
-      center(t.fg("accent", t.bold(`✧  ${title}  ✧`)), title.length + 6, width),
-      center(t.fg("muted", SUBTITLE), SUBTITLE.length, width),
-      center(t.fg("dim", DUST), DUST.length, width),
-    ];
+function gateRow(text: string, width: number): string {
+  // "🔮 " = 3 cells each side (orb is double-width) → 6 cells of frame.
+  if (text.length + 6 >= width) {
+    return `${MINT}${ORB} ${BOLD}${CORAL}${text.slice(0, Math.max(0, width - 8))}${RESET} ${MINT}${ORB}${RESET}`;
   }
-  const lines: string[] = [];
-  lines.push(center(t.fg("dim", DUST), DUST.length, width));
-  for (const [fairy, tales] of LETTERS) {
-    lines.push(center(t.fg("accent", t.bold(fairy)) + t.fg("mdCode", t.bold(tales)), ART_WIDTH, width));
-  }
-  const sub = `✧ ${SUBTITLE} ✦`;
-  lines.push(center(t.fg("muted", sub), sub.length, width));
-  lines.push(center(t.fg("dim", DUST), DUST.length, width));
-  return lines;
+  const inner = width - 6;
+  const padding = inner - text.length;
+  const left = Math.floor(padding / 2);
+  const right = padding - left;
+  return (
+    `${MINT}${ORB} ${SLATE}${"•".repeat(left)}` +
+    `${BOLD}${CORAL}${text}${RESET}` +
+    `${SLATE}${"•".repeat(right)}${RESET} ${MINT}${ORB}${RESET}`
+  );
+}
+
+/** Render the masthead at the given width. Returns fully colored lines. */
+export function renderMasthead(_t: ThemeLike, width: number): string[] {
+  return [runeBar(width), gateRow(TITLE, width), gateRow(SUBTITLE, width), runeBar(width)];
 }
