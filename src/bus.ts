@@ -18,7 +18,9 @@ export interface RunSummary {
   startedAt: number;
   lastActivity: string;
   background: boolean;
-  state: "running" | "done" | "error" | "aborted";
+  state: "queued" | "running" | "done" | "error" | "aborted";
+  tokens?: number;
+  transcriptPath?: string;
 }
 
 export interface AgentsStatusPayload {

@@ -2,13 +2,18 @@
  * AgentRunner: spawns and tracks nested agent sessions via the pi SDK.
  *
  * Isolation: each subagent gets a DefaultResourceLoader pointed at an EMPTY
- * agentDir with in-memory settings — no installed packages or global
- * extensions load inside subagents, so pi-fairy-tales can never recurse into
- * itself. Guard rails and the fetch tool are re-injected explicitly via
- * extensionFactories. Role tool allowlists never include the agent tools.
+ * agentDir with in-memory settings — no installed packages or global extensions
+ * load inside subagents, so pi-fairy-tales can never recurse into itself. Guard
+ * rails and the fetch tool are re-injected explicitly. Role tool allowlists
+ * never include the agent tools.
+ *
+ * Beyond one-shot spawning it provides: a concurrency queue (overflow waits for
+ * a slot instead of failing), transient-error retry with backoff, token-based
+ * cost estimation when providers report $0, per-run transcript persistence, and
+ * follow-up conversations with recently finished agents.
  */
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, readdirSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   createAgentSession,
@@ -20,7 +25,8 @@ import type { FairyTalesConfig, RoleConfig } from "../config.ts";
 import { resolveTierModel } from "../config.ts";
 import type { RunSummary } from "../bus.ts";
 import { buildRolePrompt, composeTask } from "./prompts.ts";
-import { clipTail, fmtDuration, fmtTokens, fmtUsd } from "../text.ts";
+import { clipTail, fmtDuration, fmtTokens, fmtUsd, slugify } from "../text.ts";
+import { emptyAgentDir, estimateCostUsd, isTransientError, debug } from "../util.ts";
 
 import hooksExtension from "../../extensions/fairy-tales-hooks.ts";
 import webExtension from "../../extensions/fairy-tales-web.ts";
@@ -29,13 +35,25 @@ export interface RunResult {
   text: string;
   summary: RunSummary;
   warnings: string[];
+  /** Parsed structured envelope if the subagent emitted a trailing ```json block. */
+  structured?: unknown;
 }
+
+type LiveSession = {
+  abort(): Promise<void>;
+  dispose(): void;
+  prompt(text: string, opts?: unknown): Promise<void>;
+  subscribe(fn: (e: { type: string; [k: string]: unknown }) => void): () => void;
+  messages: Array<{ role?: string; content?: unknown }>;
+};
 
 interface Run {
   summary: RunSummary;
-  session: { abort(): Promise<void>; dispose(): void };
+  session: LiveSession;
   promise: Promise<RunResult>;
   result?: RunResult;
+  /** Kept alive for follow-up (agent_control continue); disposed by LRU/shutdown. */
+  live?: LiveSession;
 }
 
 export interface SpawnOptions {
@@ -51,11 +69,8 @@ export interface SpawnOptions {
   onUpdate?: (activity: string) => void;
 }
 
-let emptyAgentDir: string | undefined;
-function getEmptyAgentDir(): string {
-  emptyAgentDir ??= mkdtempSync(join(tmpdir(), "pi-fairy-tales-subagent-"));
-  return emptyAgentDir;
-}
+const TRANSCRIPT_DIR = join(homedir(), ".pi", "agent", "fairy-tales-transcripts");
+const KEEP_ALIVE = 3; // completed sessions kept for follow-up
 
 function extractText(msg: { content?: unknown } | undefined): string {
   const content = (msg as { content?: Array<{ type?: string; text?: string }> } | undefined)?.content;
@@ -67,9 +82,23 @@ function extractText(msg: { content?: unknown } | undefined): string {
     .join("\n");
 }
 
+/** Parse an optional trailing ```json … ``` block into a structured object. */
+function parseStructured(text: string): unknown {
+  const m = text.match(/```json\s*([\s\S]*?)```\s*$/i);
+  if (!m) return undefined;
+  try {
+    return JSON.parse(m[1].trim());
+  } catch {
+    return undefined;
+  }
+}
+
 export class AgentRunner {
   private runs = new Map<string, Run>();
   private nextId = 1;
+  private running = 0;
+  private waiters: Array<() => void> = [];
+  private liveOrder: string[] = []; // LRU of kept-alive session run ids
 
   constructor(
     private cfg: () => FairyTalesConfig,
@@ -84,33 +113,59 @@ export class AgentRunner {
   list(): RunSummary[] {
     return [...this.runs.values()].map((r) => r.summary);
   }
-
   get(id: string): Run | undefined {
     return this.runs.get(id);
   }
-
   runningCount(): number {
     return this.list().filter((r) => r.state === "running").length;
   }
 
+  private async acquireSlot(max: number): Promise<void> {
+    while (this.running >= Math.max(1, max)) {
+      await new Promise<void>((res) => this.waiters.push(res));
+    }
+    this.running++;
+  }
+  private releaseSlot(): void {
+    this.running = Math.max(0, this.running - 1);
+    this.waiters.shift()?.();
+  }
+
   async abort(id: string): Promise<boolean> {
     const run = this.runs.get(id);
-    if (!run || run.summary.state !== "running") return false;
+    if (!run || (run.summary.state !== "running" && run.summary.state !== "queued")) return false;
     run.summary.state = "aborted";
-    await run.session.abort();
+    try {
+      await run.session.abort();
+    } catch {
+      /* not started yet */
+    }
     return true;
   }
 
   async abortAll(): Promise<void> {
     for (const run of this.runs.values()) {
-      if (run.summary.state === "running") {
+      if (run.summary.state === "running" || run.summary.state === "queued") {
         run.summary.state = "aborted";
         try {
           await run.session.abort();
         } catch {
-          // already gone
+          /* already gone */
         }
       }
+      this.disposeLive(run);
+    }
+    this.waiters.splice(0).forEach((w) => w());
+  }
+
+  private disposeLive(run: Run): void {
+    if (run.live) {
+      try {
+        run.live.dispose();
+      } catch {
+        /* already disposed */
+      }
+      run.live = undefined;
     }
   }
 
@@ -118,7 +173,7 @@ export class AgentRunner {
     try {
       this.onStatus(this.list());
     } catch {
-      // status sinks must never break runs
+      /* status sinks must never break runs */
     }
   }
 
@@ -128,42 +183,15 @@ export class AgentRunner {
     if (!role) {
       throw new Error(`Unknown agent role "${opts.role}". Available: ${Object.keys(cfg.agents.roles).join(", ")}`);
     }
-    if (this.runningCount() >= cfg.agents.maxConcurrent) {
-      throw new Error(
-        `Too many concurrent agents (max ${cfg.agents.maxConcurrent}). Wait for a running agent to finish or abort one with agent_control.`,
-      );
+    // Overflow queues rather than fails, but a huge backlog still errors.
+    const queued = this.list().filter((r) => r.state === "queued").length;
+    if (queued >= cfg.agents.maxConcurrent * 4) {
+      throw new Error(`Agent queue is full (${queued} waiting). Let some finish before spawning more.`);
     }
 
     const id = `a${this.nextId++}`;
     const warnings: string[] = [];
-    let resolved: { model: unknown; thinkingLevel: string | undefined } | undefined;
-
-    if (cfg.agents.modelMode === "single") {
-      // Single mode: every role runs on one model; roles keep their tier's thinking level.
-      const tierThinking = cfg.tiers?.[role.tier]?.thinkingLevel;
-      const single = cfg.agents.singleModel;
-      if (!single || single === "session") {
-        resolved = { model: opts.fallbackModel, thinkingLevel: tierThinking };
-      } else {
-        const slash = single.indexOf("/");
-        const found =
-          slash > 0 ? opts.modelRegistry.find(single.slice(0, slash), single.slice(slash + 1)) : undefined;
-        if (found) {
-          resolved = { model: found, thinkingLevel: tierThinking };
-        } else {
-          warnings.push(
-            `Single model "${single}" not found — subagent ran on the lead session's model instead. Fix with /agent-model.`,
-          );
-        }
-      }
-    } else {
-      resolved = resolveTierModel(opts.modelRegistry, cfg, role.tier);
-      if (!resolved) {
-        warnings.push(
-          `Tier "${role.tier}" model unavailable — subagent ran on the lead session's model instead. Check tiers in fairy-tales config.`,
-        );
-      }
-    }
+    const resolved = this.resolveModel(role, opts, cfg, warnings);
     const model = (resolved?.model ?? opts.fallbackModel) as { id?: string } | undefined;
 
     const summary: RunSummary = {
@@ -174,16 +202,14 @@ export class AgentRunner {
       turns: 0,
       costUsd: 0,
       startedAt: Date.now(),
-      lastActivity: "starting",
+      lastActivity: this.running >= cfg.agents.maxConcurrent ? "queued" : "starting",
       background: opts.background,
-      state: "running",
+      state: "queued",
     };
 
-    // Register synchronously so parallel sibling spawns see this run when
-    // checking maxConcurrent, and so list/abort work while the session boots.
     const placeholder: Run = {
       summary,
-      session: { abort: async () => {}, dispose: () => {} },
+      session: { abort: async () => {}, dispose: () => {}, prompt: async () => {}, subscribe: () => () => {}, messages: [] },
       promise: undefined as never,
     };
     this.runs.set(id, placeholder);
@@ -192,6 +218,76 @@ export class AgentRunner {
     const promise = this.execute(id, placeholder, role, resolved, opts, cfg, warnings);
     placeholder.promise = promise;
     return { id, promise };
+  }
+
+  private resolveModel(
+    role: RoleConfig,
+    opts: SpawnOptions,
+    cfg: FairyTalesConfig,
+    warnings: string[],
+  ): { model: unknown; thinkingLevel: string | undefined } | undefined {
+    if (cfg.agents.modelMode === "single") {
+      const tierThinking = cfg.tiers?.[role.tier]?.thinkingLevel;
+      const single = cfg.agents.singleModel;
+      if (!single || single === "session") return { model: opts.fallbackModel, thinkingLevel: tierThinking };
+      const slash = single.indexOf("/");
+      const found = slash > 0 ? opts.modelRegistry.find(single.slice(0, slash), single.slice(slash + 1)) : undefined;
+      if (found) return { model: found, thinkingLevel: tierThinking };
+      warnings.push(`Single model "${single}" not found — ran on the lead session's model. Fix with /agent-model.`);
+      return undefined;
+    }
+    const resolved = resolveTierModel(opts.modelRegistry, cfg, role.tier);
+    if (!resolved) {
+      warnings.push(`Tier "${role.tier}" model unavailable — ran on the lead session's model. Check tiers in config.`);
+    }
+    return resolved;
+  }
+
+  private async bootSession(
+    role: RoleConfig,
+    resolved: { model: unknown; thinkingLevel: string | undefined } | undefined,
+    opts: SpawnOptions,
+  ): Promise<{ session: LiveSession; fallbackMessage?: string }> {
+    const loader = new DefaultResourceLoader({
+      cwd: opts.cwd,
+      agentDir: emptyAgentDir(),
+      settingsManager: SettingsManager.inMemory({}),
+      systemPromptOverride: () => buildRolePrompt(opts.role, role),
+      extensionFactories: [hooksExtension, webExtension],
+    });
+    const g = globalThis as Record<string, unknown>;
+    g.__fairyTalesDepth = ((g.__fairyTalesDepth as number | undefined) ?? 0) + 1;
+    try {
+      await loader.reload();
+      const created = await createAgentSession({
+        cwd: opts.cwd,
+        model: (resolved?.model ?? opts.fallbackModel) as never,
+        thinkingLevel: (resolved?.thinkingLevel ?? "medium") as never,
+        tools: role.tools as never,
+        resourceLoader: loader,
+        sessionManager: SessionManager.inMemory(opts.cwd),
+        settingsManager: SettingsManager.inMemory({}),
+      });
+      return { session: created.session as unknown as LiveSession, fallbackMessage: created.modelFallbackMessage };
+    } finally {
+      g.__fairyTalesDepth = Math.max(0, ((g.__fairyTalesDepth as number | undefined) ?? 1) - 1);
+    }
+  }
+
+  private saveTranscript(summary: RunSummary, session: LiveSession): void {
+    try {
+      mkdirSync(TRANSCRIPT_DIR, { recursive: true });
+      const file = join(TRANSCRIPT_DIR, `${summary.startedAt}-${slugify(summary.name)}-${summary.id}.json`);
+      writeFileSync(file, JSON.stringify({ summary, messages: session.messages }, null, 2), "utf-8");
+      summary.transcriptPath = file;
+      // Prune old transcripts (keep newest 50).
+      const files = readdirSync(TRANSCRIPT_DIR).filter((f) => f.endsWith(".json")).sort();
+      for (const old of files.slice(0, Math.max(0, files.length - 50))) {
+        rmSync(join(TRANSCRIPT_DIR, old), { force: true });
+      }
+    } catch (err) {
+      debug("engine", "failed to save transcript", err);
+    }
   }
 
   private async execute(
@@ -204,45 +300,35 @@ export class AgentRunner {
     warnings: string[],
   ): Promise<RunResult> {
     const summary = run.summary;
-    const loader = new DefaultResourceLoader({
-      cwd: opts.cwd,
-      agentDir: getEmptyAgentDir(),
-      settingsManager: SettingsManager.inMemory({}),
-      systemPromptOverride: () => buildRolePrompt(opts.role, role),
-      extensionFactories: [hooksExtension, webExtension],
-    });
-    const g = globalThis as Record<string, unknown>;
-    g.__fairyTalesDepth = ((g.__fairyTalesDepth as number | undefined) ?? 0) + 1;
-    let session: Awaited<ReturnType<typeof createAgentSession>>["session"];
-    try {
-      await loader.reload();
-      const created = await createAgentSession({
-        cwd: opts.cwd,
-        model: (resolved?.model ?? opts.fallbackModel) as never,
-        thinkingLevel: (resolved?.thinkingLevel ?? "medium") as never,
-        tools: role.tools as never,
-        resourceLoader: loader,
-        sessionManager: SessionManager.inMemory(opts.cwd),
-        settingsManager: SettingsManager.inMemory({}),
-      });
-      session = created.session;
-      if (created.modelFallbackMessage) warnings.push(created.modelFallbackMessage);
-    } finally {
-      g.__fairyTalesDepth = Math.max(0, ((g.__fairyTalesDepth as number | undefined) ?? 1) - 1);
-    }
-
-    if (summary.state !== "running") {
-      // aborted while the session was booting
-      session.dispose();
+    await this.acquireSlot(cfg.agents.maxConcurrent);
+    if (summary.state === "aborted") {
+      this.releaseSlot();
       return { text: "(aborted before start)", summary, warnings };
+    }
+    summary.state = "running";
+    summary.lastActivity = "starting";
+    this.emitStatus();
+
+    let session: LiveSession;
+    try {
+      const booted = await this.bootSession(role, resolved, opts);
+      session = booted.session;
+      if (booted.fallbackMessage) warnings.push(booted.fallbackMessage);
+    } catch (err) {
+      summary.state = "error";
+      this.releaseSlot();
+      this.emitStatus();
+      throw new Error(`Subagent ${summary.name} failed to start: ${String(err)}`);
     }
     run.session = session;
     this.emitStatus();
 
     let capped: string | undefined;
     let tokens = 0;
+    let inTok = 0;
+    let outTok = 0;
 
-    const unsubscribe = session.subscribe((event: { type: string; [k: string]: unknown }) => {
+    const unsubscribe = session.subscribe((event) => {
       if (event.type === "turn_start") {
         summary.turns += 1;
         if (summary.turns > cfg.agents.maxTurnsPerRun) {
@@ -253,12 +339,15 @@ export class AgentRunner {
         this.emitStatus();
       } else if (event.type === "message_end") {
         const msg = event.message as
-          | { role?: string; usage?: { cost?: { total?: number }; totalTokens?: number } }
+          | { role?: string; usage?: { cost?: { total?: number }; totalTokens?: number; input?: number; output?: number } }
           | undefined;
-        if (msg?.role === "assistant") {
-          const cost = msg.usage?.cost?.total ?? 0;
+        if (msg?.role === "assistant" && msg.usage) {
+          const reported = msg.usage.cost?.total ?? 0;
+          inTok += msg.usage.input ?? 0;
+          outTok += msg.usage.output ?? 0;
+          tokens += msg.usage.totalTokens ?? 0;
+          const cost = reported > 0 ? reported : estimateCostUsd(msg.usage.input ?? 0, msg.usage.output ?? 0);
           summary.costUsd += cost;
-          tokens += msg.usage?.totalTokens ?? 0;
           if (cost > 0) this.onCost(cost);
           if (summary.costUsd > cfg.agents.maxCostPerRunUsd) {
             capped = `cost cap (${fmtUsd(cfg.agents.maxCostPerRunUsd)}) reached`;
@@ -270,8 +359,7 @@ export class AgentRunner {
       } else if (event.type === "tool_execution_start") {
         const tool = event.toolName as string;
         const input = event.args ?? event.input;
-        const detail =
-          tool === "bash" ? String((input as { command?: string } | undefined)?.command ?? "").slice(0, 60) : "";
+        const detail = tool === "bash" ? String((input as { command?: string } | undefined)?.command ?? "").slice(0, 60) : "";
         summary.lastActivity = detail ? `${tool}: ${detail}` : tool;
         opts.onUpdate?.(summary.lastActivity);
         this.emitStatus();
@@ -287,16 +375,24 @@ export class AgentRunner {
     opts.signal?.addEventListener("abort", onAbort, { once: true });
 
     try {
-      await session.prompt(composeTask(opts.task, opts.context));
+      // Prompt with transient-error retry.
+      const maxRetries = 2;
+      for (let attempt = 0; ; attempt++) {
+        await session.prompt(composeTask(opts.task, opts.context));
+        const err = this.lastAssistantError(session);
+        if (err && isTransientError(err) && attempt < maxRetries && summary.state === "running") {
+          warnings.push(`Transient error (attempt ${attempt + 1}), retrying: ${err.slice(0, 120)}`);
+          await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+          continue;
+        }
+        break;
+      }
 
       const assistant = [...session.messages]
         .reverse()
-        .find((m: { role?: string }) => m.role === "assistant") as
-        | { errorMessage?: string; stopReason?: string; content?: unknown }
-        | undefined;
+        .find((m) => m.role === "assistant") as { errorMessage?: string; content?: unknown } | undefined;
       let text = extractText(assistant).trim();
       if (assistant?.errorMessage && (capped || summary.state === "aborted")) {
-        // The abort we triggered surfaces as a provider error — the cap/abort warning already covers it.
         text = text || "(run aborted)";
       } else if (assistant?.errorMessage) {
         summary.state = "error";
@@ -305,20 +401,21 @@ export class AgentRunner {
       } else if (!text) {
         text = "(subagent produced no final text)";
       }
-      if (capped) {
-        warnings.push(`Run stopped early: ${capped}. The result below may be incomplete.`);
-      }
+      if (capped) warnings.push(`Run stopped early: ${capped}. The result below may be incomplete.`);
       if (summary.state === "running") summary.state = "done";
 
+      const structured = parseStructured(text);
       const elapsed = Date.now() - summary.startedAt;
-      const stats = `[${summary.role} · ${summary.model} · ${summary.turns} turns · ${fmtTokens(tokens)} tok · ${fmtUsd(summary.costUsd)} · ${fmtDuration(elapsed)}]`;
+      summary.tokens = tokens || inTok + outTok;
+      const stats = `[${summary.role} · ${summary.model} · ${summary.turns} turns · ${fmtTokens(summary.tokens)} tok · ${fmtUsd(summary.costUsd)} · ${fmtDuration(elapsed)}]`;
       const result: RunResult = {
         text: `${warnings.map((w) => `⚠ ${w}\n`).join("")}${clipTail(text)}\n\n${stats}`,
         summary,
         warnings,
+        structured,
       };
-      const run2 = this.runs.get(id);
-      if (run2) run2.result = result;
+      run.result = result;
+      this.saveTranscript(summary, session);
       return result;
     } catch (err) {
       summary.state = "error";
@@ -326,19 +423,72 @@ export class AgentRunner {
     } finally {
       opts.signal?.removeEventListener("abort", onAbort);
       unsubscribe();
-      try {
-        session.dispose();
-      } catch {
-        // already disposed
+      this.releaseSlot();
+      // Keep the session alive for follow-up if it completed cleanly; else dispose.
+      if (summary.state === "done") {
+        run.live = session;
+        this.liveOrder.push(id);
+        while (this.liveOrder.length > KEEP_ALIVE) {
+          const evict = this.liveOrder.shift()!;
+          const r = this.runs.get(evict);
+          if (r) this.disposeLive(r);
+        }
+      } else {
+        try {
+          session.dispose();
+        } catch {
+          /* already disposed */
+        }
       }
       summary.lastActivity = "finished";
       this.emitStatus();
-      // Keep finished runs listed for agent_control result/list; prune old ones.
+      // Prune old finished run records (keep newest 20).
       if (this.runs.size > 20) {
         for (const [key, r] of this.runs) {
-          if (r.summary.state !== "running" && this.runs.size > 20) this.runs.delete(key);
+          if (this.runs.size <= 20) break;
+          if (r.summary.state !== "running" && r.summary.state !== "queued" && !r.live) this.runs.delete(key);
         }
       }
+    }
+  }
+
+  private lastAssistantError(session: LiveSession): string | undefined {
+    const a = [...session.messages].reverse().find((m) => m.role === "assistant") as
+      | { errorMessage?: string }
+      | undefined;
+    return a?.errorMessage;
+  }
+
+  /** Continue a conversation with a recently finished agent (follow-up). */
+  async continue(id: string, task: string, signal?: AbortSignal): Promise<RunResult | undefined> {
+    const run = this.runs.get(id);
+    if (!run) return undefined;
+    if (!run.live) {
+      return {
+        text: `Agent ${id} is no longer live (only the ${KEEP_ALIVE} most recent finished agents can be continued). Spawn a fresh agent with the needed context.`,
+        summary: run.summary,
+        warnings: [],
+      };
+    }
+    const session = run.live;
+    const onAbort = () => void session.abort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const g = globalThis as Record<string, unknown>;
+    g.__fairyTalesDepth = ((g.__fairyTalesDepth as number | undefined) ?? 0) + 1;
+    try {
+      run.summary.state = "running";
+      this.emitStatus();
+      await session.prompt(task);
+      const assistant = [...session.messages].reverse().find((m) => m.role === "assistant");
+      const text = extractText(assistant).trim() || "(no reply)";
+      run.summary.state = "done";
+      const result: RunResult = { text: clipTail(text), summary: run.summary, warnings: [], structured: parseStructured(text) };
+      run.result = result;
+      this.emitStatus();
+      return result;
+    } finally {
+      g.__fairyTalesDepth = Math.max(0, ((g.__fairyTalesDepth as number | undefined) ?? 1) - 1);
+      signal?.removeEventListener("abort", onAbort);
     }
   }
 }

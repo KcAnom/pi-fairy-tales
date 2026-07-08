@@ -9,7 +9,7 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { loadFairyTalesConfig, saveUserConfig, isNested, type FairyTalesConfig } from "../src/config.ts";
+import { loadFairyTalesConfig, saveUserConfig, isNested, roleNames, type FairyTalesConfig } from "../src/config.ts";
 import { AgentRunner } from "../src/subagent/engine.ts";
 import { AGENTS_STATUS, COST_ADD, type RunSummary } from "../src/bus.ts";
 import { fmtDuration, fmtUsd } from "../src/text.ts";
@@ -67,20 +67,26 @@ export default function (pi: ExtensionAPI) {
     await runner.abortAll();
   });
 
-  const roleNames = ["explore", "plan", "build", "review", "general"] as const;
+  // Role enum is derived from config so custom roles are reachable (#14).
+  const cfgRoles = roleNames(loadFairyTalesConfig(process.cwd()));
+  const roleEnum = (cfgRoles.length ? cfgRoles : ["explore", "plan", "build", "review", "general"]) as [string, ...string[]];
+  const roleDescriptions = Object.entries(loadFairyTalesConfig(process.cwd()).agents.roles)
+    .map(([n, r]) => `${n} (${r.description ?? "custom role"})`)
+    .join(", ");
 
   pi.registerTool({
     name: "agent",
     label: "Agent",
     description:
-      "Delegate a task to a specialized subagent running in its own context. Roles: explore (fast read-only scout), plan (architect, read-only), build (implements and verifies), review (finds real defects, read-only), general (full toolbox). The subagent cannot ask questions — give it a complete, self-contained task. Set background:true to keep working while it runs; its result is delivered to you when it finishes.",
-    promptSnippet: "Delegate a task to a role-specialized subagent (explore/plan/build/review/general)",
+      `Delegate a task to a specialized subagent running in its own context. Roles: ${roleDescriptions}. The subagent cannot ask questions — give it a complete, self-contained task. Set background:true to keep working while it runs; its result is delivered to you when it finishes. Overflow beyond the concurrency limit is queued, not rejected.`,
+    promptSnippet: "Delegate a task to a role-specialized subagent",
     promptGuidelines: [
       "Use agent with role 'explore' to search or map the codebase instead of reading many files yourself; issue several agent calls in ONE message to fan out in parallel.",
       "Give agent tasks that are self-contained: include all context the subagent needs, and say exactly what the result must contain.",
+      "Use agent_control with action 'continue' and a follow-up task to ask a just-finished agent a follow-up question without re-spawning.",
     ],
     parameters: Type.Object({
-      role: StringEnum(roleNames),
+      role: StringEnum(roleEnum),
       task: Type.String({ description: "Complete, self-contained task description including expected output" }),
       context: Type.Optional(Type.String({ description: "Extra context: relevant paths, constraints, prior findings" })),
       name: Type.Optional(Type.String({ description: "Short display name for this run" })),
@@ -107,7 +113,7 @@ export default function (pi: ExtensionAPI) {
         const result = await promise;
         return {
           content: [{ type: "text", text: result.text }],
-          details: { ...result.summary },
+          details: { ...result.summary, structured: result.structured },
         };
       }
 
@@ -152,12 +158,14 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "agent_control",
     label: "Agent Control",
-    description: "Manage running subagents: list all runs, get the result of a finished run, or abort a running one.",
+    description:
+      "Manage subagents: 'list' all runs, 'result' to get a finished run's output, 'abort' a running one, 'continue' to send a follow-up task to a recently finished agent (reuses its context), or 'transcript' to get the path to a finished run's full message log for debugging.",
     parameters: Type.Object({
-      action: StringEnum(["list", "result", "abort"] as const),
-      id: Type.Optional(Type.String({ description: "Run id (required for result/abort)" })),
+      action: StringEnum(["list", "result", "abort", "continue", "transcript"] as const),
+      id: Type.Optional(Type.String({ description: "Run id (required for result/abort/continue/transcript)" })),
+      task: Type.Optional(Type.String({ description: "Follow-up task (required for continue)" })),
     }),
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params, signal) {
       if (params.action === "list") {
         const runs = runner.list();
         const text = runs.length
@@ -175,10 +183,25 @@ export default function (pi: ExtensionAPI) {
         const ok = await runner.abort(params.id);
         return { content: [{ type: "text", text: ok ? `Aborted ${params.id}.` : `${params.id} is not running.` }] };
       }
+      if (params.action === "continue") {
+        if (!params.task) throw new Error("agent_control continue requires a task");
+        const result = await runner.continue(params.id, params.task, signal);
+        if (!result) throw new Error(`Unknown run id ${params.id}`);
+        return { content: [{ type: "text", text: result.text }], details: { ...result.summary, structured: result.structured } };
+      }
+      if (params.action === "transcript") {
+        const r = runner.get(params.id);
+        if (!r) throw new Error(`Unknown run id ${params.id}`);
+        const path = r.summary.transcriptPath;
+        return {
+          content: [{ type: "text", text: path ? `Transcript: ${path} (read it for the full run)` : `No transcript saved for ${params.id}.` }],
+          details: { transcriptPath: path },
+        };
+      }
       const run = runner.get(params.id);
       if (!run) throw new Error(`Unknown run id ${params.id}`);
       if (run.result) {
-        return { content: [{ type: "text", text: run.result.text }], details: { ...run.result.summary } };
+        return { content: [{ type: "text", text: run.result.text }], details: { ...run.result.summary, structured: run.result.structured } };
       }
       return {
         content: [{ type: "text", text: `${params.id} is still ${run.summary.state} (${run.summary.lastActivity}).` }],

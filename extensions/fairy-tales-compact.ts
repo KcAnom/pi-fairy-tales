@@ -14,11 +14,9 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { isNested } from "../src/config.ts";
-import { clipHead } from "../src/text.ts";
+import { isNested, loadFairyTalesConfig, resolveTierModel } from "../src/config.ts";
+import { clipTail } from "../src/text.ts";
+import { emptyAgentDir, debug } from "../src/util.ts";
 
 const SUMMARIZER_PROMPT = `You are a conversation summarizer for a coding agent. You receive a serialized conversation and produce a handoff summary so the agent can continue seamlessly with the older messages removed.
 
@@ -56,17 +54,22 @@ export default function (pi: ExtensionAPI) {
         ? `\n\n[Previous summary to merge]:\n${preparation.previousSummary}`
         : "";
 
+      // Summarize on the configured cheap tier when available (falls back to lead model).
+      const cfg = loadFairyTalesConfig(ctx.cwd);
+      const tierName = cfg.compaction?.tier;
+      const tier = tierName ? resolveTierModel(ctx.modelRegistry, cfg, tierName) : undefined;
+
       const loader = new DefaultResourceLoader({
         cwd: ctx.cwd,
-        agentDir: mkdtempSync(join(tmpdir(), "pi-fairy-tales-compact-")),
+        agentDir: emptyAgentDir(),
         settingsManager: SettingsManager.inMemory({}),
         systemPromptOverride: () => SUMMARIZER_PROMPT,
       });
       await loader.reload();
       const { session } = await createAgentSession({
         cwd: ctx.cwd,
-        model: ctx.model as never,
-        thinkingLevel: "low" as never,
+        model: (tier?.model ?? ctx.model) as never,
+        thinkingLevel: (tier?.thinkingLevel ?? "low") as never,
         noTools: "all" as never,
         resourceLoader: loader,
         sessionManager: SessionManager.inMemory(ctx.cwd),
@@ -76,8 +79,9 @@ export default function (pi: ExtensionAPI) {
       const onAbort = () => void session.abort();
       signal?.addEventListener("abort", onAbort, { once: true });
       try {
+        // Keep the TAIL — the newest messages are the most relevant to continue from.
         await session.prompt(
-          `Summarize this conversation:\n\n${clipHead(conversation, 300_000, 20_000)}${filesNote}${previous}`,
+          `Summarize this conversation:\n\n${clipTail(conversation, 300_000, 20_000)}${filesNote}${previous}`,
         );
         const assistant = [...session.messages]
           .reverse()
@@ -103,8 +107,30 @@ export default function (pi: ExtensionAPI) {
         signal?.removeEventListener("abort", onAbort);
         session.dispose();
       }
-    } catch {
+    } catch (err) {
+      debug("compact", "custom compaction failed, falling back to default", err);
       return undefined; // pi's default compaction takes over
+    }
+  });
+
+  // Proactive compaction: when context crosses the configured threshold, compact
+  // with focus instructions rather than waiting for pi's automatic trigger (#18).
+  let compacting = false;
+  pi.on("turn_end", async (_event, ctx) => {
+    if (compacting) return;
+    const cfg = loadFairyTalesConfig(ctx.cwd);
+    const threshold = cfg.compaction?.proactiveAtPercent;
+    if (!threshold) return;
+    const usage = ctx.getContextUsage();
+    if (usage?.percent != null && usage.percent >= threshold) {
+      compacting = true;
+      try {
+        await ctx.compact({ customInstructions: "Preserve the current task, recent decisions, and the next step precisely." });
+      } catch (err) {
+        debug("compact", "proactive compaction failed", err);
+      } finally {
+        compacting = false;
+      }
     }
   });
 }

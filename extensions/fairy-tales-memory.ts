@@ -29,11 +29,28 @@ export default function (pi: ExtensionAPI) {
     injected = false;
   });
 
-  pi.on("before_agent_start", async (_event, ctx) => {
+  // Context management (#17): if re-injection left more than one memory block in
+  // the window, keep only the most recent so stale copies don't waste context.
+  pi.on("context", async (event) => {
+    if (isNested()) return;
+    const messages = (event as { messages?: Array<{ customType?: string }> }).messages;
+    if (!messages) return;
+    const memIdx = messages
+      .map((m, i) => (m.customType === "fairy-tales-memory" ? i : -1))
+      .filter((i) => i >= 0);
+    if (memIdx.length <= 1) return;
+    const keep = memIdx[memIdx.length - 1];
+    const filtered = messages.filter((m, i) => m.customType !== "fairy-tales-memory" || i === keep);
+    return { messages: filtered };
+  });
+
+  pi.on("before_agent_start", async (event, ctx) => {
     if (injected || isNested()) return;
     const cfg = loadFairyTalesConfig(ctx.cwd);
     if (!cfg.memory.injectIndex) return;
-    const index = getStore(ctx.cwd).readIndex();
+    // Rank against the current prompt so long-lived memory doesn't flood context.
+    const prompt = (event as { prompt?: string }).prompt;
+    const index = getStore(ctx.cwd).relevantIndex(prompt);
     if (!index) return;
     injected = true;
     return {
@@ -65,6 +82,26 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: `Remembered (${path})` }],
         details: { path, topic: params.topic },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "forget",
+    label: "Forget",
+    description: "Remove memories from the index that match a query (a phrase or keyword). Use to correct outdated or wrong facts.",
+    promptSnippet: "Remove outdated or incorrect memories",
+    promptGuidelines: [
+      "Use forget when the user says a remembered fact is wrong or no longer true; pass a distinctive phrase from the memory.",
+    ],
+    parameters: Type.Object({
+      query: Type.String({ description: "Phrase or keyword identifying the memory/memories to remove" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const removed = await getStore(ctx.cwd).forget(params.query);
+      return {
+        content: [{ type: "text", text: removed ? `Forgot ${removed} memor${removed === 1 ? "y" : "ies"} matching "${params.query}".` : `No memories matched "${params.query}".` }],
+        details: { removed },
       };
     },
   });

@@ -9,6 +9,17 @@ Rules:
 - Verify claims against the actual code/system before stating them.
 - Your FINAL message is returned verbatim to the lead agent as the task result. It is not a chat reply: lead with the outcome, include concrete details (paths, line numbers, commands, errors), and keep it self-contained. Everything important must be in that final message.`;
 
+// A machine-readable envelope the lead can parse without re-reading prose.
+const STRUCTURED_TRAILER = `
+
+After your prose result, end your FINAL message with exactly one fenced JSON block summarizing the outcome, so the lead agent can act on it programmatically:
+
+\`\`\`json
+{ "status": "done" | "partial" | "failed", "summary": "one sentence", "filesTouched": ["path", ...], "findings": ["short bullet", ...] }
+\`\`\`
+
+Use [] for empty lists. Put the prose first, the JSON block last.`;
+
 const ROLE_EXTRAS: Record<string, string> = {
   explore:
     "You are read-only: report what exists, where, and how it connects. Include file paths and line references for every claim.",
@@ -28,6 +39,7 @@ export function buildRolePrompt(roleName: string, role: RoleConfig): string {
   const extra = ROLE_EXTRAS[roleName];
   if (extra) parts.push(extra);
   if (role.promptAppend) parts.push(role.promptAppend);
+  parts.push(STRUCTURED_TRAILER);
   return parts.join("\n\n");
 }
 
