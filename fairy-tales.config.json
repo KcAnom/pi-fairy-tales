@@ -5,8 +5,8 @@
     "brain": { "model": "deepseek-openai/deepseek-v4-pro", "thinkingLevel": "high" }
   },
   "agents": {
-    "maxConcurrent": 3,
-    "maxTurnsPerRun": 30,
+    "maxConcurrent": 5,
+    "maxTurnsPerRun": 50,
     "maxCostPerRunUsd": 1.5,
     "modelMode": "tiered",
     "singleModel": "session",
