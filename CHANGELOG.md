@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — 2026-07-09
+
+**New capability**
+- **`/ultraplan <task>`** — a heavier sibling of plan mode. Backgrounds a read-only planning agent (the terminal stays free), gates the finished plan on your approval (Approve & Execute / Approve / View / Reject), then implements it in an **isolated git worktree** — self-repairing against `.pi/test-command` — landing the result as a **PR** (when a remote + `gh` exist) or a **patch**. Your working tree is never touched until you adopt it. Always runs on your **session model**, ignoring tier/single config. Built natively on the existing subagent engine (no external planning engine). New `ultraplan` config block (`planners`, `worktree`, `autoExecute`, `planRole`, `buildRole`); `planners > 1` adds a synthesis pass. Verified end-to-end in `ftales` across both the patch and PR paths, with full worktree + branch cleanup. Distinct from `/plan`, which stays in-session and read-only.
+
+**Changed**
+- Default subagent model mode is now `single` / `session`: a fresh install runs on your own session model out of the box, with no fallback warnings. Tiered per-role models are an explicit opt-in via `/agent-model`. Shipped tier models are generic placeholders now (the retired deepseek references removed).
+
 ## 0.2.0 — 2026-07-08
 
 A 39-item enhancement pass across security, agentic depth, TUI, ops, and a new capability.
