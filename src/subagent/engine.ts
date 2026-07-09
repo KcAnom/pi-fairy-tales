@@ -65,6 +65,8 @@ export interface SpawnOptions {
   cwd: string;
   modelRegistry: { find(provider: string, id: string): unknown };
   fallbackModel: unknown;
+  /** Ignore tier/single config and run on fallbackModel (the session model). Used by /ultraplan. */
+  forceSessionModel?: boolean;
   signal?: AbortSignal;
   onUpdate?: (activity: string) => void;
 }
@@ -191,7 +193,10 @@ export class AgentRunner {
 
     const id = `a${this.nextId++}`;
     const warnings: string[] = [];
-    const resolved = this.resolveModel(role, opts, cfg, warnings);
+    // /ultraplan pins subagents to the session model; everything else honors tier/single config.
+    const resolved = opts.forceSessionModel
+      ? { model: opts.fallbackModel, thinkingLevel: cfg.tiers?.[role.tier]?.thinkingLevel }
+      : this.resolveModel(role, opts, cfg, warnings);
     const model = (resolved?.model ?? opts.fallbackModel) as { id?: string } | undefined;
 
     const summary: RunSummary = {

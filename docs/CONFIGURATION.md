@@ -126,6 +126,23 @@ Additive rule arrays — concatenated onto the shipped defaults instead of repla
 - `tier` — which tier model summarizes during compaction and `/tale` (a cheap tier saves cost). Omit to use the lead model.
 - `proactiveAtPercent` — when context usage crosses this %, compact automatically with focus instructions rather than waiting for pi's trigger. Omit to disable proactive compaction.
 
+## `ultraplan`
+
+```json
+"ultraplan": { "planners": 1, "worktree": true, "autoExecute": false, "planRole": "plan", "buildRole": "build" }
+```
+
+Drives the `/ultraplan <task>` command — a heavier sibling of plan mode: background a planning agent, gate the plan on your approval, then optionally implement it in an isolated git worktree.
+
+| Key | Meaning |
+|---|---|
+| `planners` | How many independent planning agents run in parallel (max 4). `>1` adds a synthesis pass that merges the drafts into one plan. Default `1`. |
+| `worktree` | When `true`, execution happens in a throwaway `git worktree` on branch `ultraplan/exec-<ts>`, so your working tree is never touched; the result lands as a PR (if a remote + `gh` exist) or a `.patch` in the repo root. When `false` (or not a git repo), the build agent edits your working tree directly. |
+| `autoExecute` | Skip the approval gate and execute immediately after planning. Default `false` (the gate always asks). |
+| `planRole` / `buildRole` | Which `agents.roles` entry does the planning (read-only) and the implementation (edits). Defaults `plan` / `build`. |
+
+`/ultraplan` **always runs on your current session model** (it ignores `agents.modelMode`), so it needs no tier configuration. The build agent self-repairs against `<project>/.pi/test-command` (the same post-edit test hook used everywhere) before the plan is committed.
+
 ## Debugging
 
 Set `FAIRY_TALES_DEBUG=1` to log internal diagnostics (swallowed errors, config problems, overlay/subagent internals) to `$TMPDIR/fairy-tales-debug.log`.
@@ -140,6 +157,6 @@ Set `FAIRY_TALES_DEBUG=1` to log internal diagnostics (swallowed errors, config 
 ## Command / tool inventory
 
 **Tools (model-invoked):** `agent`, `agent_control`, `todo`, `remember`, `fetch`, `exit_plan`
-**Commands:** `/plan`, `/agents`, `/agent-model`, `/memory`, `/grimoire`, `/tale` (ftales only)
+**Commands:** `/plan`, `/ultraplan`, `/agents`, `/agent-model`, `/memory`, `/grimoire`, `/checkpoints`, `/rollback`, `/tale` (ftales only)
 **Prompts:** `/commit`, `/review`, `/plan-task`, `/standup`
 **Skills:** `deep-review`, `handoff`, `ship`

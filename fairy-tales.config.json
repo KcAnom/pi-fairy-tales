@@ -54,5 +54,6 @@
     "postEdit": { "testCommandFile": ".pi/test-command", "enabled": true, "timeoutMs": 120000 }
   },
   "web": { "timeoutMs": 20000, "maxBytes": 51200, "blockPrivateHosts": true },
-  "compaction": { "tier": "scout", "proactiveAtPercent": 85 }
+  "compaction": { "tier": "scout", "proactiveAtPercent": 85 },
+  "ultraplan": { "planners": 1, "worktree": true, "autoExecute": false, "planRole": "plan", "buildRole": "build" }
 }

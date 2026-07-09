@@ -57,6 +57,19 @@ export interface FairyTalesConfig {
   web: { timeoutMs: number; maxBytes: number; blockPrivateHosts?: boolean };
   /** Optional compaction summarizer tier (falls back to the lead model). */
   compaction?: { tier?: string; proactiveAtPercent?: number };
+  /** /ultraplan: background heavy planning → approval gate → worktree execution, always on the session model. */
+  ultraplan?: {
+    /** Parallel planning agents; >1 adds a synthesis pass that merges them into one plan. */
+    planners: number;
+    /** Isolate execution in a throwaway git worktree (leaves the working tree untouched). */
+    worktree: boolean;
+    /** Skip the approval gate and execute immediately after planning. */
+    autoExecute: boolean;
+    /** Role used for planning (read-only). */
+    planRole: string;
+    /** Role used for execution (edits/writes). */
+    buildRole: string;
+  };
   /** Internal UI state persisted by the brand extension (previousTheme, etc.). */
   ui?: { previousTheme?: string };
 }

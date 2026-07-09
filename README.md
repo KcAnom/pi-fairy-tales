@@ -44,6 +44,7 @@ Or skip tiers entirely: run `/agent-model` inside pi and pick "Single — follow
 | `/agent-model` | Switch subagent model strategy: **tiered** (per-role) or **single** (one model — session or a specific one). Persists to `~/.pi/agent/fairy-tales.json`. |
 | Memory | Relevance-ranked `MEMORY.md` injected each session; `remember` (deduped) and `forget` tools; `#topic` autocomplete; `/memory` editor. |
 | Plan mode | `/plan`, `--plan`, or `ctrl+alt+p`. Truly read-only — no delegate-to-write escape; saved plans in `~/.pi/agent/plans/`; branch-correct across forks. |
+| `/ultraplan` | Heavy-planning workflow: backgrounds a planning agent (terminal stays free) → **approval gate** (Approve & Execute / Approve / View / Reject) → on execute, a build agent implements the plan in an **isolated git worktree**, self-repairing against `.pi/test-command`, ending in a PR or a patch. Your working tree is untouched until you adopt the result. Always runs on your **session model**. Distinct from `/plan` (in-session, read-only). |
 | Hooks | Bash regex + path glob guard rails (`block`/`confirm`, headless fail-safe) that also catch **bash-mediated writes** and normalize quote/`$HOME` evasion. Post-edit hook runs `<project>/.pi/test-command` and steers failures back to self-fix. Active inside subagents. |
 | Checkpoints | `/checkpoints` and `/rollback` — non-destructive git snapshots after edits, so a broken change can return to the last good state. |
 | `todo` tool | Multi-step checklist, widget, state survives restart/fork. |
