@@ -1,1 +1,33 @@
+# Dependencies
 node_modules/
+
+# Secrets & credentials — NEVER commit these
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+auth.json
+credentials.json
+secrets.json
+*.secret
+
+# pi runtime / user config (lives in ~/.pi, never in the repo)
+.pi/
+models.json
+
+# Build & publish artifacts
+*.tgz
+dist/
+build/
+*.log
+
+# OS & editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/

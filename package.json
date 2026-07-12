@@ -6,6 +6,26 @@
   "keywords": [
     "pi-package"
   ],
+  "homepage": "https://github.com/KcAnom/pi-fairy-tales#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KcAnom/pi-fairy-tales.git"
+  },
+  "bugs": {
+    "url": "https://github.com/KcAnom/pi-fairy-tales/issues"
+  },
+  "files": [
+    "extensions",
+    "src",
+    "skills",
+    "prompts",
+    "themes",
+    "docs",
+    "fairy-tales.config.json",
+    "install.sh",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md"
+  ],
   "pi": {
     "extensions": [
       "./extensions"
