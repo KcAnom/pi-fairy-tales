@@ -19,8 +19,13 @@ Subagent orchestration · isolated-worktree planning · guard-rail hooks · pers
 
 > Built as an exploration of what a *thoughtfully-engineered* agent harness looks like — where the interesting parts are the safety model and the isolation guarantees, not the prompts.
 
-<!-- DEMO: replace this line with an animated GIF / asciinema of `ftales` + /ultraplan once recorded -->
-<div align="center"><em>▶ Demo recording coming soon — <code>ftales</code> planning a change and shipping it as a PR from an isolated worktree.</em></div>
+<div align="center">
+
+![Fairy Tales — once upon a terminal](https://raw.githubusercontent.com/KcAnom/pi-fairy-tales/main/assets/masthead.webp)
+
+<em>▶ Demo recording coming soon — <code>ftales</code> planning a change and shipping it as a PR from an isolated worktree.</em>
+
+</div>
 
 ## Why it's interesting
 

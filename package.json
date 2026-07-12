@@ -38,7 +38,8 @@
     ],
     "themes": [
       "./themes"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/KcAnom/pi-fairy-tales/main/assets/masthead.webp"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
