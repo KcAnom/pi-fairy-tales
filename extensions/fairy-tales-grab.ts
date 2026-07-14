@@ -1,8 +1,8 @@
 /**
- * fairy-tales-copy: /copy — clipboard without mouse-selecting wrapped terminal text.
- * `/copy` puts the last assistant response on the clipboard as clean logical text
- * (no wrapping, no UI decoration); `/copy pick` opens a picker over recent code
- * blocks, responses, and tool outputs so you copy exactly what the model produced.
+ * fairy-tales-grab: /grab — clipboard without mouse-selecting wrapped terminal text.
+ * Opens a picker over recent code blocks, responses, and tool outputs so you copy
+ * exactly what the model produced, as clean logical text (no wrapping, no UI
+ * decoration). Complements pi's built-in /copy, which takes the last message whole.
  * Clipboard: pbcopy / wl-copy / xclip / xsel / clip, falling back to the OSC 52
  * escape (the terminal sets the clipboard itself — works over SSH).
  */
@@ -67,9 +67,9 @@ const fmtSize = (bytes: number) => (bytes >= 1024 ? `${(bytes / 1024).toFixed(1)
 export default function (pi: ExtensionAPI) {
   if (isNested()) return;
 
-  pi.registerCommand("copy", {
-    description: "Copy the last response to the clipboard; `/copy pick` chooses a code block, response, or tool output",
-    handler: async (args, ctx) => {
+  pi.registerCommand("grab", {
+    description: "Pick a code block, response, or tool output to copy (pi's built-in /copy takes the last message)",
+    handler: async (_args, ctx) => {
       if (!ctx.hasUI) return;
 
       const messages: Array<{ role?: string; toolName?: string; content?: unknown }> = [];
@@ -90,20 +90,7 @@ export default function (pi: ExtensionAPI) {
         );
       };
 
-      // `/copy` with no args: the last assistant response, instantly.
-      if (!args?.trim()) {
-        for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i].role !== "assistant") continue;
-          const text = extractText(messages[i].content).trim();
-          if (!text) continue;
-          await doCopy(text, "last response");
-          return;
-        }
-        ctx.ui.notify("Nothing to copy yet — no assistant response in this session.", "info");
-        return;
-      }
-
-      // `/copy pick` (any argument): picker over recent copyable items, newest first.
+      // Picker over recent copyable items, newest first.
       interface Item {
         label: string;
         text: string;

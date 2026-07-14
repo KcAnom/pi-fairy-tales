@@ -93,7 +93,7 @@ If a tier model is ever unavailable, subagents fall back to your session model w
 | `fetch` tool | URL → readable text, **SSRF-protected** (blocks private / loopback hosts), streamed to a byte cap. |
 | `artifact` tool | Produce a polished, self-contained, theme-aware HTML document (report / roadmap / dashboard) and open it in the browser. Backed by the `artifact` design skill. |
 | Input shortcuts | `??` ask-mode (answer read-only this turn), `>>` verbatim. |
-| `/copy` | Last response → clipboard as clean logical text (no terminal wrapping, no UI decoration). `/copy pick` opens a picker over recent code blocks, responses, and tool outputs. Uses `pbcopy`/`wl-copy`/`xclip`/`clip`, falling back to OSC 52 (works over SSH). |
+| `/grab` | Picker over recent code blocks, responses, and tool outputs → clipboard as clean logical text (no terminal wrapping, no UI decoration). Complements pi's built-in `/copy` (last message). Uses `pbcopy`/`wl-copy`/`xclip`/`clip`, falling back to OSC 52 (works over SSH). |
 | Skills | `deep-review`, `handoff`, `ship`, `artifact`. |
 | Prompts | `/commit`, `/review`, `/plan-task`, `/standup`. |
 | `/grimoire` | Scrollable on-demand catalog of installed skills / prompts / extensions / themes in a book overlay. Pairs with pi's `quietStartup` so startup is clean. Works in plain pi and `ftales`. |

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1 — 2026-07-14
+
+**Fixed**
+- **`/copy` renamed to `/grab`** — pi ships a built-in `/copy` (last message → clipboard) and the extension command conflicted with it. `/grab` now opens the picker directly (code blocks first, then responses and tool outputs); use pi's `/copy` for the whole last message.
+
 ## 0.7.0 — 2026-07-14
 
 **New capability**
