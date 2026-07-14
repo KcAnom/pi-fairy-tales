@@ -44,6 +44,38 @@ export function estimateCostUsd(inputTokens: number, outputTokens: number): numb
   return (inputTokens / 1_000_000) * DEFAULT_INPUT_PER_MTOK + (outputTokens / 1_000_000) * DEFAULT_OUTPUT_PER_MTOK;
 }
 
+/**
+ * Show a self-dismissing footer status. pi's ui.notify("info") prints a
+ * PERSISTENT line into the conversation — wrong for "copied!" feedback.
+ * A status segment set and cleared on a timer is the transient toast.
+ * Consecutive flashes on the same key extend cleanly (old timer cancelled).
+ */
+const flashTimers = new Map<string, ReturnType<typeof setTimeout>>();
+export function flashStatus(
+  ui: { setStatus(key: string, text?: string): void },
+  key: string,
+  text: string,
+  ms = 4000,
+): void {
+  try {
+    ui.setStatus(key, text);
+  } catch {
+    return; // UI gone (reload) — nothing to flash or clear
+  }
+  const prev = flashTimers.get(key);
+  if (prev) clearTimeout(prev);
+  const timer = setTimeout(() => {
+    flashTimers.delete(key);
+    try {
+      ui.setStatus(key, undefined);
+    } catch {
+      // UI replaced meanwhile
+    }
+  }, ms);
+  (timer as { unref?: () => void }).unref?.();
+  flashTimers.set(key, timer);
+}
+
 /** Detect transient provider errors worth retrying (rate limits, 5xx, network). */
 export function isTransientError(message: string | undefined): boolean {
   if (!message) return false;

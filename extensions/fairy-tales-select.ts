@@ -7,7 +7,8 @@
  * Notes:
  * - Requires the terminal to deliver mouse reporting (most do; Terminal.app
  *   gates it behind View → Allow Mouse Reporting).
- * - v1 has no live highlight; the toast on release is the confirmation.
+ * - Live highlight: the selection is overdrawn in reverse video while dragging
+ *   and restored from the render buffer on change/release.
  * - Wheel and non-left-button events are consumed so they never leak into the
  *   editor as garbage; wheel scrolling inside a mouse-reporting terminal is
  *   traded away — disable with ui.copyOnSelect: false to get it back.
@@ -17,6 +18,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isNested, loadFairyTalesConfig } from "../src/config.ts";
 import { CLIP_MARK } from "../src/bus.ts";
+import { flashStatus } from "../src/util.ts";
 import { copyToClipboard } from "./fairy-tales-grab.ts";
 
 const ENABLE = "\x1b[?1002h\x1b[?1006h";
@@ -68,6 +70,58 @@ export default function (pi: ExtensionAPI) {
   let notify: ((msg: string) => void) | undefined;
   let anchor: Point | undefined;
   let head: Point | undefined;
+  // Screen rows currently overdrawn with the selection highlight.
+  const paintedRows = new Set<number>();
+  let lastPaintAt = 0;
+
+  const frameOf = (t: Tui) => (t as unknown as { previousLines?: string[] }).previousLines;
+  const heightOf = (t: Tui) => t.terminal.rows ?? process.stdout.rows ?? 24;
+
+  /**
+   * Live highlight: restore previously painted rows from the render buffer,
+   * then overdraw the current selection in reverse video. The cursor is
+   * saved/restored (DECSC/DECRC) so the renderer's position tracking holds.
+   * A real re-render mid-drag overwrites the paint; the next motion event
+   * repaints. Colors inside the selection collapse to inverse mono — that's
+   * the standard selection look.
+   */
+  const paint = (restoreOnly = false) => {
+    if (!tui) return;
+    const frame = frameOf(tui);
+    if (!Array.isArray(frame) || !frame.length) return;
+    const height = heightOf(tui);
+    const top = Math.max(0, frame.length - height);
+    let buf = "\x1b7";
+    for (const r of paintedRows) {
+      const idx = top + r - 1;
+      if (idx >= 0 && idx < frame.length) buf += `\x1b[${r};1H\x1b[2K${frame[idx]}\x1b[0m`;
+    }
+    paintedRows.clear();
+    if (!restoreOnly && anchor && head) {
+      let [a, b] = [anchor, head];
+      if (b.row < a.row || (b.row === a.row && b.col < a.col)) [a, b] = [b, a];
+      for (let r = Math.max(1, a.row); r <= Math.min(height, b.row); r++) {
+        const idx = top + r - 1;
+        if (idx < 0 || idx >= frame.length) continue;
+        const plain = frame[idx].replace(ANSI, "");
+        const from = Math.max(0, (r === a.row ? a.col : 1) - 1);
+        const to = r === b.row ? b.col : plain.length;
+        const slice = plain.slice(from, Math.max(from, to));
+        if (!slice) continue;
+        buf += `\x1b[${r};${from + 1}H\x1b[7m${slice}\x1b[0m`;
+        paintedRows.add(r);
+      }
+    }
+    buf += "\x1b8";
+    tui.terminal.write(buf);
+  };
+
+  const paintThrottled = () => {
+    const now = Date.now();
+    if (now - lastPaintAt < 25) return;
+    lastPaintAt = now;
+    paint();
+  };
 
   const disableModes = () => {
     if (!enabled) return;
@@ -88,9 +142,10 @@ export default function (pi: ExtensionAPI) {
     const moved = anchor.row !== head.row || Math.abs(anchor.col - head.col) >= 1;
     const [a, h] = [anchor, head];
     anchor = head = undefined;
+    paint(true); // clear the highlight
     if (!moved) return; // a plain click, not a selection
-    const frame = (tui as unknown as { previousLines?: string[] }).previousLines;
-    const rows = tui.terminal.rows ?? process.stdout.rows ?? 24;
+    const frame = frameOf(tui);
+    const rows = heightOf(tui);
     if (!Array.isArray(frame) || !frame.length) return;
     const text = extractSelection(frame, rows, a, h);
     if (!text.trim()) return;
@@ -117,10 +172,12 @@ export default function (pi: ExtensionAPI) {
     if (isLeft && !isMotion) {
       anchor = { row, col };
       head = { row, col };
+      paint();
       return { consume: true };
     }
     if (isLeft && isMotion && anchor) {
       head = { row, col };
+      paintThrottled();
       return { consume: true };
     }
     return { consume: true }; // other buttons — swallow
@@ -135,13 +192,7 @@ export default function (pi: ExtensionAPI) {
       disableModes();
       return;
     }
-    notify = (msg) => {
-      try {
-        ctx.ui.notify(msg, "info");
-      } catch {
-        /* UI replaced */
-      }
-    };
+    notify = (msg) => flashStatus(ctx.ui, "fairy-tales-select", msg);
     // A zero-line widget whose factory hands us the live TUI instance.
     ctx.ui.setWidget(
       "fairy-tales-select",

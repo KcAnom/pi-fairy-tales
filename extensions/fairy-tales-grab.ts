@@ -10,6 +10,7 @@ import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isNested } from "../src/config.ts";
 import { CLIP_MARK } from "../src/bus.ts";
+import { flashStatus } from "../src/util.ts";
 
 function extractText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -84,11 +85,12 @@ export default function (pi: ExtensionAPI) {
         pi.events.emit(CLIP_MARK, { text }); // clipwatch: this change is ours, don't double-toast
         const via = await copyToClipboard(text);
         const lines = text.split("\n").length;
-        ctx.ui.notify(
+        flashStatus(
+          ctx.ui,
+          "fairy-tales-grab",
           `⧉ Copied ${what} — ${lines} line${lines > 1 ? "s" : ""}, ${fmtSize(Buffer.byteLength(text, "utf-8"))}${
             via === "osc52" ? " (via terminal OSC 52)" : ""
           }`,
-          "info",
         );
       };
 

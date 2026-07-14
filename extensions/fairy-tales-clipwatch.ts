@@ -10,6 +10,7 @@ import { execFile } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isNested, loadFairyTalesConfig } from "../src/config.ts";
 import { CLIP_MARK } from "../src/bus.ts";
+import { flashStatus } from "../src/util.ts";
 
 const POLL_MS = 1000;
 
@@ -63,11 +64,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       const lines = now.split("\n").length;
-      try {
-        ctx.ui.notify(`⧉ Copied to clipboard (${lines} line${lines > 1 ? "s" : ""} · ${now.length} chars)`, "info");
-      } catch {
-        // UI gone (reload) — the next session_start rebuilds the watcher
-      }
+      flashStatus(ctx.ui, "fairy-tales-clip", `⧉ Copied to clipboard (${lines} line${lines > 1 ? "s" : ""} · ${now.length} chars)`);
     }, POLL_MS);
   });
 
