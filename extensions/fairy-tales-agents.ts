@@ -36,7 +36,7 @@ export default function (pi: ExtensionAPI) {
       pi.events.emit(AGENTS_STATUS, { running });
       updateWidget(running);
     },
-    (usd) => pi.events.emit(COST_ADD, { usd }),
+    (usd) => pi.events.emit(COST_ADD, { usd, source: "subagent" }),
   );
 
   // The Fae Council: storybook identities for subagent roles, ftales-only.

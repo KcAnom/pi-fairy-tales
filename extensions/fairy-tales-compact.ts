@@ -15,8 +15,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isNested, loadFairyTalesConfig, resolveCheapestModel, resolveTierModel } from "../src/config.ts";
+import { COST_ADD } from "../src/bus.ts";
 import { clipTail } from "../src/text.ts";
-import { emptyAgentDir, debug } from "../src/util.ts";
+import { emptyAgentDir, debug, estimateCostUsd } from "../src/util.ts";
 
 const SUMMARIZER_PROMPT = `You are a conversation summarizer for a coding agent. You receive a serialized conversation and produce a handoff summary so the agent can continue seamlessly with the older messages removed.
 
@@ -82,6 +83,23 @@ export default function (pi: ExtensionAPI) {
         settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
       });
 
+      // Attribute the summarizer's spend to the cost ledger — compaction was
+      // previously invisible in the session's cost counters.
+      let sumCost = 0;
+      let sumIn = 0;
+      let sumOut = 0;
+      const unsub = (session as unknown as { subscribe(fn: (e: { type: string; [k: string]: unknown }) => void): () => void }).subscribe(
+        (e) => {
+          if (e.type !== "message_end") return;
+          const msg = e.message as { role?: string; usage?: { cost?: { total?: number }; input?: number; output?: number } };
+          if (msg?.role === "assistant" && msg.usage) {
+            sumIn += msg.usage.input ?? 0;
+            sumOut += msg.usage.output ?? 0;
+            sumCost += (msg.usage.cost?.total ?? 0) || estimateCostUsd(msg.usage.input ?? 0, msg.usage.output ?? 0);
+          }
+        },
+      );
+
       const onAbort = () => void session.abort();
       signal?.addEventListener("abort", onAbort, { once: true });
       try {
@@ -110,6 +128,10 @@ export default function (pi: ExtensionAPI) {
           },
         };
       } finally {
+        unsub();
+        if (sumCost > 0 || sumIn > 0 || sumOut > 0) {
+          pi.events.emit(COST_ADD, { usd: sumCost, source: "compaction", inputTokens: sumIn, outputTokens: sumOut });
+        }
         signal?.removeEventListener("abort", onAbort);
         session.dispose();
       }

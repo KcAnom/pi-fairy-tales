@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 — 2026-07-14
+
+**New capability**
+- **`/ledger`** — where the session's tokens and cost actually went, in a book overlay: main conversation vs. each subagent (per run, with model/turns/tokens) vs. compaction summaries vs. `/tale`, with cost-share bars, totals, and cache-read stats. Main and subagent totals rebuild from the session branch, so they survive restarts. Works in plain pi and `ftales`.
+
+**Fixed**
+- **Compaction spend is no longer invisible.** The compaction summarizer now reports its cost (and token counts) through the cost bus, so the footer's gold counter, the status line, and `/ledger` all include it. `/tale` and subagent cost events now carry a source tag so the ledger can attribute spend by category.
+
 ## 0.4.0 — 2026-07-14
 
 Token-economy release: the cost of running fairy-tales is now visible, configurable from the TUI, and frugal by default.

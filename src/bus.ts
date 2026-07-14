@@ -29,6 +29,10 @@ export interface AgentsStatusPayload {
 
 export interface CostAddPayload {
   usd: number;
+  /** Spend category for the ledger; unsourced additions count as "other". */
+  source?: "subagent" | "compaction" | "tale";
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export interface PlanChangedPayload {

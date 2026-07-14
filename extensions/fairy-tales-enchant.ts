@@ -254,12 +254,16 @@ export default function (pi: ExtensionAPI) {
         });
         // Attribute the narrator's cost to the gold ledger.
         let taleCost = 0;
+        let taleIn = 0;
+        let taleOut = 0;
         const unsub = (session as unknown as { subscribe(fn: (e: { type: string; [k: string]: unknown }) => void): () => void }).subscribe(
           (e) => {
             if (e.type === "message_end") {
               const u = (e.message as { role?: string; usage?: { cost?: { total?: number }; input?: number; output?: number } })?.usage;
               const role = (e.message as { role?: string })?.role;
               if (role === "assistant" && u) {
+                taleIn += u.input ?? 0;
+                taleOut += u.output ?? 0;
                 taleCost += (u.cost?.total ?? 0) || estimateCostUsd(u.input ?? 0, u.output ?? 0);
               }
             }
@@ -282,7 +286,7 @@ export default function (pi: ExtensionAPI) {
             return;
           }
           taleCache = { count: messages.length, text: tale };
-          if (taleCost > 0) pi.events.emit(COST_ADD, { usd: taleCost });
+          if (taleCost > 0) pi.events.emit(COST_ADD, { usd: taleCost, source: "tale", inputTokens: taleIn, outputTokens: taleOut });
           await showTale(ctx, tale);
         } finally {
           unsub();

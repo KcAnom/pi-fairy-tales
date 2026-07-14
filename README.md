@@ -88,6 +88,7 @@ If a tier model is ever unavailable, subagents fall back to your session model w
 | `todo` tool | Multi-step checklist, widget, state survives restart / fork. |
 | Smart compaction | Structured handoff summaries on a cheap tier, keeping the recent tail; triggers **proactively** at a context threshold; falls back to pi's default on error. Provider overflow errors normalized so compaction engages. |
 | Status line | `model · ctx% · $cost · ⚡agents` (one owner of the vitals). |
+| `/ledger` | Where the session's tokens and cost went: main conversation vs. each subagent vs. compaction summaries vs. `/tale`, with token counts, cache stats, and cost-share bars in a book overlay. Subagent totals survive restarts. |
 | `fetch` tool | URL → readable text, **SSRF-protected** (blocks private / loopback hosts), streamed to a byte cap. |
 | `artifact` tool | Produce a polished, self-contained, theme-aware HTML document (report / roadmap / dashboard) and open it in the browser. Backed by the `artifact` design skill. |
 | Input shortcuts | `??` ask-mode (answer read-only this turn), `>>` verbatim. |
