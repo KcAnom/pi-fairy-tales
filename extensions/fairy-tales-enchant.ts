@@ -17,11 +17,11 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { wrapTextWithAnsi, Text } from "@earendil-works/pi-tui";
-import { isNested, loadFairyTalesConfig, resolveCheapestModel, resolveTierModel } from "../src/config.ts";
+import { isNested, lineupLabel, loadFairyTalesConfig, resolveCheapestModel, resolveTierModel } from "../src/config.ts";
 import { renderMasthead, closeOverlay } from "../src/banner.ts";
 import { bookOverlay } from "../src/overlay.ts";
 import { AGENTS_STATUS, COST_ADD, type AgentsStatusPayload, type CostAddPayload } from "../src/bus.ts";
-import { clipTail, fmtUsd } from "../src/text.ts";
+import { clipTail, fmtUsd, shortModelId } from "../src/text.ts";
 import { emptyAgentDir, estimateCostUsd } from "../src/util.ts";
 
 const NARRATOR_PROMPT = `You are the Narrator of a storybook about a software developer's work. You receive a serialized coding-agent conversation and retell it as a short fairy-tale chapter.
@@ -128,7 +128,9 @@ export default function (pi: ExtensionAPI) {
             render(width: number): string[] {
               try {
               const parts: string[] = [];
-              if (modelName) parts.push(theme.fg("accent", `✦ ${modelName}`));
+              const lineup = lineupLabel(loadFairyTalesConfig(process.cwd()), shortModelId);
+              if (lineup) parts.push(theme.fg("accent", lineup));
+              else if (modelName) parts.push(theme.fg("accent", `✦ ${modelName}`));
               const branch = footerData.getGitBranch();
               if (branch) parts.push(theme.fg("muted", `⚘ realm: ${branch}`));
               if (inkPct !== undefined) {

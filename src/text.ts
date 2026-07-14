@@ -32,6 +32,13 @@ export function clipHead(text: string, maxBytes = 51200, maxLines = 2000): strin
   return t.truncated ? `${t.content}\n[...truncated at ${maxBytes} bytes]` : t.content;
 }
 
+/** "gpt-5.6-sol" → "sol", "gpt-5.4-mini" → "mini"; ids whose last segment is
+ * numeric (e.g. "glm-5.2") or dashless stay whole. */
+export function shortModelId(id: string): string {
+  const seg = id.split("-").pop() ?? id;
+  return seg && seg !== id && !/^\d/.test(seg) ? seg : id;
+}
+
 export function slugify(text: string, maxLen = 40): string {
   return (
     text

@@ -31,6 +31,25 @@ import { emptyAgentDir, estimateCostUsd, isTransientError, debug } from "../util
 import hooksExtension from "../../extensions/fairy-tales-hooks.ts";
 import webExtension from "../../extensions/fairy-tales-web.ts";
 
+/**
+ * Orchestrated-mode escalation decision: a finished cheap-tier run whose result
+ * failed (provider error, or the structured envelope says failed/blocked)
+ * retries once on the conductor tier. Pure so it can be unit-tested.
+ */
+export function shouldEscalate(
+  cfg: FairyTalesConfig,
+  roleTier: string | undefined,
+  summary: { state: string },
+  structured: unknown,
+  alreadyEscalated: boolean,
+): boolean {
+  if (cfg.agents.modelMode !== "orchestrated" || alreadyEscalated) return false;
+  if (!cfg.tiers?.conductor?.model) return false;
+  if (roleTier === "conductor") return false;
+  const status = (structured as { status?: string } | undefined)?.status?.toLowerCase();
+  return summary.state === "error" || status === "failed" || status === "blocked";
+}
+
 export interface RunResult {
   text: string;
   summary: RunSummary;
@@ -58,6 +77,8 @@ interface Run {
 
 export interface SpawnOptions {
   role: string;
+  /** Resolve the model from this tier instead of the role's tier (escalation). */
+  tierOverride?: string;
   task: string;
   context?: string;
   name?: string;
@@ -213,6 +234,9 @@ export class AgentRunner {
       lastActivity: this.running >= cfg.agents.maxConcurrent ? "queued" : "starting",
       background: opts.background,
       state: "queued",
+      tier: opts.forceSessionModel
+        ? "session"
+        : (opts.tierOverride ?? (cfg.agents.modelMode === "single" ? "session" : role.tier)),
     };
 
     const placeholder: Run = {
@@ -234,8 +258,9 @@ export class AgentRunner {
     cfg: FairyTalesConfig,
     warnings: string[],
   ): { model: unknown; thinkingLevel: string | undefined } | undefined {
-    if (cfg.agents.modelMode === "single") {
-      const tierThinking = cfg.tiers?.[role.tier]?.thinkingLevel;
+    const tierName = opts.tierOverride ?? role.tier;
+    if (cfg.agents.modelMode === "single" && !opts.tierOverride) {
+      const tierThinking = cfg.tiers?.[tierName]?.thinkingLevel;
       const single = cfg.agents.singleModel;
       if (!single || single === "session") return { model: opts.fallbackModel, thinkingLevel: tierThinking };
       const slash = single.indexOf("/");
@@ -244,20 +269,20 @@ export class AgentRunner {
       warnings.push(`Single model "${single}" not found — ran on the lead session's model. Fix with /agent-model.`);
       return undefined;
     }
-    const resolved = resolveTierModel(opts.modelRegistry, cfg, role.tier);
+    const resolved = resolveTierModel(opts.modelRegistry, cfg, tierName);
     if (!resolved) {
       // Scout work is high-volume/low-stakes: falling back to the expensive
       // session model is the worst outcome, so try the cheapest priced model first.
-      if (role.tier === "scout") {
+      if (tierName === "scout") {
         const cheapest = resolveCheapestModel(opts.modelRegistry);
         if (cheapest) {
           warnings.push(
             `Tier "scout" model unavailable — ran on cheapest available model ${cheapest.id}. Set it with /agent-model.`,
           );
-          return { model: cheapest.model, thinkingLevel: cfg.tiers?.[role.tier]?.thinkingLevel };
+          return { model: cheapest.model, thinkingLevel: cfg.tiers?.[tierName]?.thinkingLevel };
         }
       }
-      warnings.push(`Tier "${role.tier}" model unavailable — ran on the lead session's model. Fix with /agent-model.`);
+      warnings.push(`Tier "${tierName}" model unavailable — ran on the lead session's model. Fix with /agent-model.`);
     }
     return resolved;
   }

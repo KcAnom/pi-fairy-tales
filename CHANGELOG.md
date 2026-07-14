@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.13.0 — 2026-07-14
+
+Clarity + interchangeability: always know what you're running, swap it in one move.
+
+**New capability**
+- **`/loadout`** — named model lineups. `save <name>` snapshots the entire arrangement (mode, tiers, role assignments, session model); `use <name>` (or bare `/loadout` for a picker) swaps the whole lineup in one command, realigning the session model; `delete <name>` removes one. Each shows a one-line summary ("🎼 sol ▸ mini·luna · orchestrated").
+- **Lineup in the footer** — in orchestrated mode the footer/status line shows the arrangement instead of just one model name: `🎼 sol ▸ mini·luna` (conductor ▸ crew). Changes the moment a loadout switches.
+- **Tier tags on runs** — the live agents widget and result cards now show `[tier·model]` (e.g. `[scout·mini]`, `[conductor·sol]`), so the division of labor — and any ⤴ escalation jumping tiers — is readable at a glance.
+
+## 0.12.0 — 2026-07-14
+
+**New capability**
+- **Orchestrated model mode** — the flipped pyramid: a strong "conductor" model leads while a cheap crew executes. `agents.modelMode: "orchestrated"` adds a `conductor` tier that (1) the session model is auto-aligned to at startup (via pi's setModel; falls back to a /model hint), (2) the judgment roles (plan/review) run on, and (3) **failed runs escalate to**: any subagent run that ends in a provider error or reports `status: failed/blocked` in its structured envelope is retried once on the conductor with the failed attempt's report attached (run name gets a ⤴ suffix). `/agent-model` gained an "Orchestrated" wizard option (one pick: your strongest model); `/agent-models` shows the mode, the conductor, and the escalation rule. Config validation requires a conductor tier in this mode.
+
 ## 0.11.0 — 2026-07-14
 
 **New capability**

@@ -5,9 +5,9 @@
  * emitted by the subagent engine.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { isNested, loadFairyTalesConfig, loadDiagnostics, resolveTierModel } from "../src/config.ts";
+import { isNested, lineupLabel, loadFairyTalesConfig, loadDiagnostics, resolveTierModel } from "../src/config.ts";
 import { AGENTS_STATUS, COST_ADD, type AgentsStatusPayload, type CostAddPayload } from "../src/bus.ts";
-import { fmtUsd } from "../src/text.ts";
+import { fmtUsd, shortModelId } from "../src/text.ts";
 import { estimateCostUsd } from "../src/util.ts";
 
 // The enchanted footer (ftales only) owns the vitals; the plain status segment
@@ -26,7 +26,9 @@ export default function (pi: ExtensionAPI) {
   const update = (ctx: { ui: { setStatus(key: string, text?: string): void }; hasUI: boolean }) => {
     if (!ctx.hasUI || FOOTER_OWNS_VITALS) return;
     const parts: string[] = [];
-    if (modelName) parts.push(modelName);
+    const lineup = lineupLabel(loadFairyTalesConfig(process.cwd()), shortModelId);
+    if (lineup) parts.push(lineup);
+    else if (modelName) parts.push(modelName);
     if (contextPct !== undefined) parts.push(`ctx ${contextPct}%`);
     parts.push(fmtUsd(costUsd));
     if (runningAgents > 0) parts.push(`⚡${runningAgents} agent${runningAgents > 1 ? "s" : ""}`);

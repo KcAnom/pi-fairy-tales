@@ -31,14 +31,27 @@ export interface PathRule {
   reason?: string;
 }
 
+/** A complete, switchable model arrangement (see /loadout). */
+export interface Loadout {
+  modelMode: "tiered" | "single" | "orchestrated";
+  singleModel?: string;
+  /** "provider/model-id" the session runs on under this loadout. */
+  sessionModel?: string;
+  tiers: Record<string, TierConfig>;
+  /** role name → tier name */
+  roles: Record<string, string>;
+}
+
 export interface FairyTalesConfig {
   tiers: Record<string, TierConfig>;
   agents: {
     maxConcurrent: number;
     maxTurnsPerRun: number;
     maxCostPerRunUsd: number;
-    /** "tiered" = per-role tier models; "single" = every subagent uses singleModel */
-    modelMode: "tiered" | "single";
+    /** "tiered" = per-role tier models; "single" = every subagent uses singleModel;
+     * "orchestrated" = tiered resolution + failed runs escalate to the "conductor"
+     * tier, and the session model is aligned to the conductor at startup. */
+    modelMode: "tiered" | "single" | "orchestrated";
     /** "session" = follow the lead session's current model, or "provider/model-id" */
     singleModel: string;
     roles: Record<string, RoleConfig>;
@@ -70,6 +83,8 @@ export interface FairyTalesConfig {
     /** Role used for execution (edits/writes). */
     buildRole: string;
   };
+  /** Named model lineups switchable with /loadout. */
+  loadouts?: Record<string, Loadout>;
   /** UI preferences + internal state persisted by the brand extension. */
   ui?: {
     previousTheme?: string;
@@ -145,8 +160,11 @@ function validate(cfg: FairyTalesConfig, defaults: FairyTalesConfig, diagnostics
     }
   }
   const mode = cfg.agents?.modelMode;
-  if (mode && mode !== "tiered" && mode !== "single") {
-    diagnostics.push(`agents.modelMode "${mode}" is invalid (use "tiered" or "single")`);
+  if (mode && mode !== "tiered" && mode !== "single" && mode !== "orchestrated") {
+    diagnostics.push(`agents.modelMode "${mode}" is invalid (use "tiered", "single", or "orchestrated")`);
+  }
+  if (mode === "orchestrated" && !cfg.tiers?.conductor?.model) {
+    diagnostics.push(`agents.modelMode "orchestrated" requires a "conductor" tier — run /agent-model`);
   }
   const single = cfg.agents?.singleModel;
   if (mode === "single" && single && single !== "session" && !single.includes("/")) {
@@ -238,6 +256,75 @@ export function resolveCheapestModel(modelRegistry: {
   } catch {
     return undefined;
   }
+}
+
+/** Snapshot the live model arrangement as a loadout. */
+export function buildLoadoutSnapshot(cfg: FairyTalesConfig, sessionModel?: string): Loadout {
+  const roles: Record<string, string> = {};
+  for (const [name, rc] of Object.entries(cfg.agents.roles ?? {})) roles[name] = rc.tier;
+  return {
+    modelMode: cfg.agents.modelMode,
+    singleModel: cfg.agents.singleModel,
+    sessionModel,
+    tiers: JSON.parse(JSON.stringify(cfg.tiers ?? {})),
+    roles,
+  };
+}
+
+/** Turn a loadout into a user-config patch that fully re-establishes it. */
+export function loadoutToPatch(l: Loadout): Record<string, unknown> {
+  const roles: Record<string, { tier: string }> = {};
+  for (const [name, tier] of Object.entries(l.roles ?? {})) roles[name] = { tier };
+  return {
+    tiers: l.tiers,
+    agents: { modelMode: l.modelMode, singleModel: l.singleModel ?? "session", roles },
+  };
+}
+
+/** One-line summary for pickers/notifications: "🎼 sol ▸ luna·mini · orchestrated". */
+export function loadoutSummary(l: Loadout, short: (id: string) => string): string {
+  const tail = (spec?: string) => (spec ? short(spec.slice(spec.indexOf("/") + 1)) : "?");
+  if (l.modelMode === "single") {
+    const m = l.singleModel === "session" || !l.singleModel ? tail(l.sessionModel) ?? "session" : tail(l.singleModel);
+    return `${m} everywhere · single`;
+  }
+  const lead = l.modelMode === "orchestrated" ? tail(l.tiers?.conductor?.model) : tail(l.sessionModel);
+  const crew = [...new Set(
+    Object.values(l.roles ?? {})
+      .filter((t) => t !== "conductor")
+      .map((t) => tail(l.tiers?.[t]?.model)),
+  )].join("·");
+  return `${l.modelMode === "orchestrated" ? "🎼 " : ""}${lead} ▸ ${crew || "?"} · ${l.modelMode}`;
+}
+
+/** Always-visible lineup label for the footer/status line (orchestrated mode only). */
+export function lineupLabel(cfg: FairyTalesConfig, short: (id: string) => string): string | undefined {
+  if (cfg.agents?.modelMode !== "orchestrated") return undefined;
+  const tail = (spec?: string) => (spec ? short(spec.slice(spec.indexOf("/") + 1)) : "?");
+  const crew = [...new Set(
+    Object.values(cfg.agents.roles ?? {})
+      .map((r) => r.tier)
+      .filter((t) => t !== "conductor")
+      .map((t) => tail(cfg.tiers?.[t]?.model)),
+  )].join("·");
+  return `🎼 ${tail(cfg.tiers?.conductor?.model)} ▸ ${crew || "?"}`;
+}
+
+/**
+ * Read–mutate–write the user override file under the mutation queue. Unlike
+ * saveUserConfig (deep-merge only), the mutator can DELETE keys.
+ */
+export async function updateUserConfig(mutator: (current: Record<string, unknown>) => Record<string, unknown>): Promise<string> {
+  const { withFileMutationQueue } = await import("@earendil-works/pi-coding-agent");
+  const { writeFile, mkdir } = await import("node:fs/promises");
+  const path = join(homedir(), ".pi", "agent", "fairy-tales.json");
+  await withFileMutationQueue(path, async () => {
+    const current = readJson(path) ?? {};
+    const next = mutator(current);
+    await mkdir(join(homedir(), ".pi", "agent"), { recursive: true });
+    await writeFile(path, JSON.stringify(next, null, 2) + "\n", "utf-8");
+  });
+  return path;
 }
 
 /** True when this extension instance is running inside a fairy-tales subagent. */

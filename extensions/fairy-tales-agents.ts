@@ -10,11 +10,24 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
-import { loadFairyTalesConfig, resolveCheapestModel, resolveTierModel, saveUserConfig, isNested, roleNames, type FairyTalesConfig } from "../src/config.ts";
+import {
+  buildLoadoutSnapshot,
+  isNested,
+  loadFairyTalesConfig,
+  loadoutSummary,
+  loadoutToPatch,
+  resolveCheapestModel,
+  resolveTierModel,
+  roleNames,
+  saveUserConfig,
+  updateUserConfig,
+  type FairyTalesConfig,
+  type Loadout,
+} from "../src/config.ts";
 import { bookOverlay } from "../src/overlay.ts";
-import { AgentRunner } from "../src/subagent/engine.ts";
+import { AgentRunner, shouldEscalate, type RunResult } from "../src/subagent/engine.ts";
 import { AGENTS_STATUS, COST_ADD, type RunSummary } from "../src/bus.ts";
-import { fmtDuration, fmtUsd, fmtTokens } from "../src/text.ts";
+import { fmtDuration, fmtUsd, fmtTokens, shortModelId } from "../src/text.ts";
 
 // Storybook glyphs for roles (matches the Fae Council names when branded).
 const ROLE_GLYPH: Record<string, string> = {
@@ -61,7 +74,7 @@ export default function (pi: ExtensionAPI) {
       const lines = active.map((r) => {
         const secs = fmtDuration(Date.now() - r.startedAt);
         const mark = FAE ? "✧" : "◐";
-        return ` ${mark} ${roleLabel(r.role)} · ${r.name} [${r.model}] ${r.lastActivity} · t${r.turns} · ${fmtUsd(r.costUsd)} · ${secs}`;
+        return ` ${mark} ${roleLabel(r.role)} · ${r.name} [${r.tier ?? r.role}·${shortModelId(r.model)}] ${r.lastActivity} · t${r.turns} · ${fmtUsd(r.costUsd)} · ${secs}`;
       });
       uiRef.ui.setWidget("fairy-tales-agents", lines.length ? lines : undefined, { placement: "aboveEditor" });
     } catch {
@@ -72,6 +85,29 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     cfg = loadFairyTalesConfig(ctx.cwd);
     uiRef = ctx;
+    // Orchestrated mode: the session model IS the conductor — align it.
+    if (cfg.agents.modelMode === "orchestrated") {
+      const cond = cfg.tiers?.conductor?.model;
+      const slash = cond?.indexOf("/") ?? -1;
+      if (cond && slash > 0) {
+        const condId = cond.slice(slash + 1);
+        const currentId = (ctx.model as { id?: string } | undefined)?.id;
+        if (currentId !== condId) {
+          const model = ctx.modelRegistry.find(cond.slice(0, slash), condId);
+          const setModel = (ctx as unknown as { setModel?: (m: unknown) => Promise<boolean> }).setModel;
+          if (model && typeof setModel === "function") {
+            try {
+              const ok = await setModel.call(ctx, model);
+              if (ok && ctx.hasUI) ctx.ui.notify(`🎼 Orchestrated: session aligned to conductor (${condId})`, "info");
+            } catch {
+              if (ctx.hasUI) ctx.ui.notify(`🎼 Orchestrated: conductor is ${cond} — switch with /model`, "warning");
+            }
+          } else if (ctx.hasUI) {
+            ctx.ui.notify(`🎼 Orchestrated: conductor is ${cond} but session runs ${currentId} — switch with /model`, "warning");
+          }
+        }
+      }
+    }
   });
 
   pi.on("session_shutdown", async () => {
@@ -109,7 +145,7 @@ export default function (pi: ExtensionAPI) {
       const status = d.structured?.status ? ` · ${d.structured.status}` : "";
       const header =
         theme.fg("accent", `${glyph} ${d.name ?? "agent"}`) +
-        theme.fg("dim", ` [${d.role}·${d.model}] · t${d.turns ?? 0} · ${fmtTokens(d.tokens ?? 0)} tok · ${fmtUsd(d.costUsd ?? 0)}${status}`);
+        theme.fg("dim", ` [${d.role}·${d.tier ?? "?"}·${shortModelId(d.model ?? "?")}] · t${d.turns ?? 0} · ${fmtTokens(d.tokens ?? 0)} tok · ${fmtUsd(d.costUsd ?? 0)}${status}`);
       const expanded = (opts as { expanded?: boolean })?.expanded;
       if (!expanded) return new Text(header, 0, 0);
       const body = (result.content ?? [])
@@ -119,6 +155,33 @@ export default function (pi: ExtensionAPI) {
     },
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       cfg = loadFairyTalesConfig(ctx.cwd);
+
+      // Orchestrated mode: a failed cheap-tier run retries ONCE on the
+      // conductor tier, with the failed attempt's report attached.
+      const maybeEscalate = async (result: RunResult): Promise<RunResult & { escalated?: boolean }> => {
+        const c = loadFairyTalesConfig(ctx.cwd);
+        const roleTier = c.agents.roles[params.role]?.tier;
+        if (!shouldEscalate(c, roleTier, result.summary, result.structured, false)) return result;
+        onUpdate?.({ content: [{ type: "text", text: `⟳ ${roleTier}-tier attempt failed — escalating to conductor` }], details: {} });
+        const esc = runner.spawn({
+          role: params.role,
+          tierOverride: "conductor",
+          task: params.task,
+          context: `${params.context ? `${params.context}\n\n` : ""}[ESCALATION] A ${roleTier}-tier attempt at this task failed. Its final report follows — diagnose what went wrong and complete the task properly.\n---\n${result.text.slice(-4000)}`,
+          name: `${params.name ?? params.role}⤴`,
+          background: false,
+          cwd: ctx.cwd,
+          modelRegistry: ctx.modelRegistry,
+          fallbackModel: ctx.model,
+          signal: params.background ? undefined : signal,
+          onUpdate: params.background
+            ? undefined
+            : (activity) => onUpdate?.({ content: [{ type: "text", text: `⚙ ${activity}` }], details: {} }),
+        });
+        const second = await esc.promise;
+        return { ...second, escalated: true };
+      };
+
       const { id, promise } = runner.spawn({
         role: params.role,
         task: params.task,
@@ -135,20 +198,21 @@ export default function (pi: ExtensionAPI) {
       });
 
       if (!params.background) {
-        const result = await promise;
+        const result = await maybeEscalate(await promise);
         return {
           content: [{ type: "text", text: result.text }],
-          details: { ...result.summary, structured: result.structured },
+          details: { ...result.summary, structured: result.structured, escalated: result.escalated },
         };
       }
 
       // Background: deliver the result via steer when it settles.
       promise
+        .then((first) => maybeEscalate(first))
         .then((result) => {
           pi.sendMessage(
             {
               customType: "fairy-tales-agent-result",
-              content: `Background agent "${result.summary.name}" (${result.summary.role}) finished:\n\n${result.text}`,
+              content: `Background agent "${result.summary.name}" (${result.summary.role}) finished${result.escalated ? " (escalated to conductor after a failed cheap-tier attempt)" : ""}:\n\n${result.text}`,
               display: true,
             },
             { deliverAs: "steer", triggerTurn: true },
@@ -250,7 +314,8 @@ export default function (pi: ExtensionAPI) {
           ? `single (${current.agents.singleModel === "session" ? "follows session model" : current.agents.singleModel})`
           : "tiered (per role)";
 
-      const TIERED = "Tiered — pick a model per tier (recommended: saves tokens)";
+      const ORCH = "Orchestrated — strong conductor + cheap crew, failed runs escalate (recommended)";
+      const TIERED = "Tiered — pick a model per tier";
       const SESSION = "Single — always follow my session model";
       const available =
         ((await (
@@ -261,8 +326,31 @@ export default function (pi: ExtensionAPI) {
         [];
       const modelItems = available.map((m) => `Single — ${m.provider}/${m.id}`);
 
-      const choice = await ctx.ui.select(`Subagent model mode (now: ${mode})`, [TIERED, SESSION, ...modelItems]);
+      const choice = await ctx.ui.select(`Subagent model mode (now: ${mode})`, [ORCH, TIERED, SESSION, ...modelItems]);
       if (choice === undefined) return;
+
+      if (choice === ORCH) {
+        // One pick: the conductor (your strongest model). It becomes the session
+        // model, the plan/review roles, and the escalation target; scout/worker
+        // tiers stay as configured (cheap crew).
+        const priceOf = (m: { cost?: { input?: number; output?: number } }) => {
+          const i = m.cost?.input ?? 0;
+          const o = m.cost?.output ?? 0;
+          return i <= 0 && o <= 0 ? "free/local" : `$${i}/$${o} per Mtok`;
+        };
+        const items = available.map((m) => `${m.provider}/${m.id} — ${priceOf(m)}`);
+        const pick = await ctx.ui.select("Conductor model (your strongest — judgment lives here)", items);
+        if (pick === undefined) return;
+        const m = available[items.indexOf(pick)];
+        const spec = `${m.provider}/${m.id}`;
+        const path = await saveUserConfig({
+          tiers: { conductor: { model: spec, thinkingLevel: "high" } },
+          agents: { modelMode: "orchestrated", roles: { plan: { tier: "conductor" }, review: { tier: "conductor" } } },
+        });
+        cfg = loadFairyTalesConfig(ctx.cwd);
+        ctx.ui.notify(`Orchestrated: conductor ${spec} · plan/review on conductor · failed runs escalate (saved to ${path}) — restart to align the session model`, "info");
+        return;
+      }
 
       if (choice === TIERED) {
         // Wizard: one pick per tier from the user's own available models, with
@@ -350,7 +438,9 @@ export default function (pi: ExtensionAPI) {
           const modeLabel =
             cfg.agents.modelMode === "single"
               ? `single — ${cfg.agents.singleModel === "session" ? `follows session (${sessionModel})` : cfg.agents.singleModel}`
-              : "tiered — per-role tier models";
+              : cfg.agents.modelMode === "orchestrated"
+                ? "orchestrated — conductor leads, cheap crew executes, failures escalate"
+                : "tiered — per-role tier models";
           lines.push(`${theme.bold("Mode".padEnd(14))} ${modeLabel}`);
           lines.push(`${theme.bold("Session model".padEnd(14))} ${sessionModel}`);
           lines.push("");
@@ -384,6 +474,10 @@ export default function (pi: ExtensionAPI) {
               )}`,
             );
           }
+          if (cfg.agents.modelMode === "orchestrated") {
+            const cond = cfg.tiers?.conductor?.model ?? "(unset)";
+            lines.push(`${theme.bold("Escalation".padEnd(14))} failed runs retry once on conductor (${cond})`);
+          }
           lines.push(`${theme.bold("Ultraplan".padEnd(14))} always the session model (${sessionModel})`);
           lines.push("");
           lines.push(
@@ -397,6 +491,84 @@ export default function (pi: ExtensionAPI) {
         },
         { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },
       );
+    },
+  });
+
+  pi.registerCommand("loadout", {
+    description: "Named model lineups: /loadout save|use|delete <name>, or bare /loadout to pick one",
+    handler: async (args, ctx) => {
+      if (!ctx.hasUI) return;
+      const current = loadFairyTalesConfig(ctx.cwd);
+      const loadouts = current.loadouts ?? {};
+      const model = ctx.model as { provider?: string; id?: string } | undefined;
+      const sessionSpec = model?.provider && model?.id ? `${model.provider}/${model.id}` : undefined;
+      const [verb, ...rest] = (args ?? "").trim().split(/\s+/).filter(Boolean);
+      const name = rest.join("-");
+
+      const applyLoadout = async (loadoutName: string, l: Loadout) => {
+        const path = await saveUserConfig(loadoutToPatch(l));
+        cfg = loadFairyTalesConfig(ctx.cwd);
+        // Re-align the session model to the loadout (conductor wins in orchestrated mode).
+        const target = l.modelMode === "orchestrated" ? (l.tiers?.conductor?.model ?? l.sessionModel) : l.sessionModel;
+        let aligned = "";
+        const setModel = (ctx as unknown as { setModel?: (m: unknown) => Promise<boolean> }).setModel;
+        if (target && typeof setModel === "function") {
+          const slash = target.indexOf("/");
+          const m = slash > 0 ? ctx.modelRegistry.find(target.slice(0, slash), target.slice(slash + 1)) : undefined;
+          if (m) {
+            try {
+              if (await setModel.call(ctx, m)) aligned = ` · session → ${shortModelId(target.slice(slash + 1))}`;
+            } catch {
+              /* model switch declined */
+            }
+          }
+        }
+        ctx.ui.notify(`Loadout "${loadoutName}": ${loadoutSummary(l, shortModelId)}${aligned} (saved to ${path})`, "info");
+      };
+
+      if (verb === "save") {
+        if (!name) {
+          ctx.ui.notify("Usage: /loadout save <name>", "warning");
+          return;
+        }
+        const snapshot = buildLoadoutSnapshot(current, sessionSpec);
+        await saveUserConfig({ loadouts: { [name]: snapshot } });
+        ctx.ui.notify(`Loadout "${name}" saved: ${loadoutSummary(snapshot, shortModelId)}`, "info");
+        return;
+      }
+      if (verb === "delete") {
+        if (!name || !loadouts[name]) {
+          ctx.ui.notify(name ? `No loadout named "${name}"` : "Usage: /loadout delete <name>", "warning");
+          return;
+        }
+        await updateUserConfig((c) => {
+          const lo = (c.loadouts ?? {}) as Record<string, unknown>;
+          delete lo[name];
+          return { ...c, loadouts: lo };
+        });
+        ctx.ui.notify(`Loadout "${name}" deleted`, "info");
+        return;
+      }
+      if (verb === "use") {
+        const l = loadouts[name];
+        if (!l) {
+          ctx.ui.notify(name ? `No loadout named "${name}" — /loadout save ${name} first` : "Usage: /loadout use <name>", "warning");
+          return;
+        }
+        await applyLoadout(name, l);
+        return;
+      }
+      // Bare /loadout (or list): pick one to apply.
+      const names = Object.keys(loadouts);
+      if (!names.length) {
+        ctx.ui.notify("No loadouts yet — save the current lineup with /loadout save <name>", "info");
+        return;
+      }
+      const items = names.map((n) => `${n} — ${loadoutSummary(loadouts[n], shortModelId)}`);
+      const choice = await ctx.ui.select("Switch to which loadout?", items);
+      if (choice === undefined) return;
+      const picked = names[items.indexOf(choice)];
+      await applyLoadout(picked, loadouts[picked]);
     },
   });
 

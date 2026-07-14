@@ -24,6 +24,8 @@ export interface RunSummary {
   state: "queued" | "running" | "done" | "error" | "aborted";
   tokens?: number;
   transcriptPath?: string;
+  /** Tier the model was resolved from ("session" when following the lead model). */
+  tier?: string;
 }
 
 export interface AgentsStatusPayload {
