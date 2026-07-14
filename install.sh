@@ -14,36 +14,7 @@ pi install "$PKG_DIR"
 
 # Create the branded launcher in ~/bin (survives Node upgrades).
 mkdir -p "$HOME/bin"
-cat > "$HOME/bin/ftales" <<'FTALES_LAUNCHER'
-#!/bin/sh
-# Fairy Tales — branded pi launcher (lives in ~/bin, survives Node upgrades)
-export FTALES=1
-
-# Terminal.app can't copy-on-select. If iTerm2 is installed, hand this session
-# to a new iTerm2 window (via a self-deleting .command file — no automation
-# permissions needed) so drag-select → release → clipboard just works.
-# Opt out: FTALES_NO_ITERM=1. Skipped when args are given.
-if [ "${TERM_PROGRAM:-}" = "Apple_Terminal" ] && [ -d "/Applications/iTerm.app" ] \
-  && [ -z "${FTALES_NO_ITERM:-}" ] && [ $# -eq 0 ] && [ -t 1 ]; then
-  PI_BIN="$(command -v pi)" || PI_BIN=""
-  if [ -n "$PI_BIN" ]; then
-    # Single-quote a string for safe embedding in a generated sh script.
-    sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
-    HANDOFF="${TMPDIR:-/tmp}/ftales-handoff-$$.command"
-    {
-      printf '#!/bin/sh\n'
-      printf 'rm -f "$0"\n'
-      printf 'cd %s || exit 1\n' "$(sq "$PWD")"
-      printf 'FTALES=1 exec %s\n' "$(sq "$PI_BIN")"
-    } > "$HANDOFF"
-    chmod +x "$HANDOFF"
-    echo "✦ Reopening in iTerm2 (copy-on-select works there). FTALES_NO_ITERM=1 to stay here."
-    exec open -a iTerm "$HANDOFF"
-  fi
-fi
-
-exec pi "$@"
-FTALES_LAUNCHER
+printf '#!/bin/sh\n# Fairy Tales — branded pi launcher\nexport FTALES=1\nexec pi "$@"\n' > "$HOME/bin/ftales"
 chmod +x "$HOME/bin/ftales"
 
 case ":$PATH:" in
@@ -51,20 +22,62 @@ case ":$PATH:" in
   *) echo 'NOTE: add ~/bin to your PATH, e.g.:  echo '\''export PATH="$HOME/bin:$PATH"'\'' >> ~/.zshrc' ;;
 esac
 
-# macOS Terminal.app can't copy-on-select (drag text → released → clipboard).
-# Offer iTerm2 — strictly opt-in, only interactively, and only when brew exists.
-if [ "$(uname)" = "Darwin" ] && [ "${TERM_PROGRAM:-}" = "Apple_Terminal" ] \
-  && [ ! -d "/Applications/iTerm.app" ] && command -v brew >/dev/null 2>&1 && [ -t 0 ]; then
-  printf "\nTerminal.app cannot auto-copy mouse selections. Install iTerm2 (drag-select copies on release)? [y/N] "
-  read -r _ft_ans
-  case "$_ft_ans" in
-    y|Y)
-      brew install --cask iterm2
-      defaults write com.googlecode.iterm2 CopySelection -bool true
-      echo "✓ iTerm2 installed with copy-on-select enabled — run ftales inside iTerm2."
-      ;;
-    *) echo "Skipped. Later:  brew install --cask iterm2  (copy-on-select is on by default)" ;;
-  esac
+# macOS: create ~/Applications/ftales.app so Spotlight (Cmd+Space → "ftales")
+# launches Fairy Tales directly in a terminal window (iTerm2 if present,
+# otherwise Terminal.app).
+if [ "$(uname)" = "Darwin" ]; then
+  APP="$HOME/Applications/ftales.app"
+  mkdir -p "$APP/Contents/MacOS"
+  cat > "$APP/Contents/Info.plist" <<'FTALES_PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>ftales</string>
+  <key>CFBundleDisplayName</key><string>ftales</string>
+  <key>CFBundleIdentifier</key><string>dev.pi.fairy-tales.launcher</string>
+  <key>CFBundleVersion</key><string>1.0</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleExecutable</key><string>ftales</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+</dict>
+</plist>
+FTALES_PLIST
+  cat > "$APP/Contents/MacOS/ftales" <<'FTALES_APP'
+#!/bin/sh
+# ftales.app — launch Fairy Tales in a terminal window from Spotlight/Dock.
+# GUI apps get a minimal PATH, so resolve pi explicitly.
+PI_BIN="$(command -v pi 2>/dev/null)"
+[ -z "$PI_BIN" ] && PI_BIN="$(ls -t "$HOME"/.nvm/versions/node/*/bin/pi 2>/dev/null | head -1)"
+if [ -z "$PI_BIN" ]; then
+  for p in /opt/homebrew/bin/pi /usr/local/bin/pi; do
+    [ -x "$p" ] && PI_BIN="$p" && break
+  done
+fi
+if [ -z "$PI_BIN" ]; then
+  osascript -e 'display alert "ftales" message "pi is not installed (npm i -g @earendil-works/pi-coding-agent)"' >/dev/null 2>&1
+  exit 1
+fi
+sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+HANDOFF="${TMPDIR:-/tmp}/ftales-app-$$.command"
+{
+  printf '#!/bin/sh\n'
+  # Some terminals run .command files with stdout piped, which kills a TUI —
+  # rebind to the tty (no-op when already attached). Self-delete is delayed
+  # because the file is read incrementally.
+  printf 'exec > "$(tty)" 2>&1\n'
+  printf '( sleep 5; rm -f "$0" ) &\n'
+  printf 'cd %s || exit 1\n' "$(sq "$HOME")"
+  printf 'FTALES=1 exec %s\n' "$(sq "$PI_BIN")"
+} > "$HANDOFF"
+chmod +x "$HANDOFF"
+if [ -d "/Applications/iTerm.app" ]; then
+  exec open -a iTerm "$HANDOFF"
+fi
+exec open -a Terminal "$HANDOFF"
+FTALES_APP
+  chmod +x "$APP/Contents/MacOS/ftales"
+  echo "✦ ftales.app created — launch from Spotlight: Cmd+Space, type \"ftales\""
 fi
 
 echo ""

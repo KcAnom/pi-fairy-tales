@@ -7,6 +7,9 @@
 export const AGENTS_STATUS = "fairy-tales:agents:status";
 export const COST_ADD = "fairy-tales:cost:add";
 export const PLAN_CHANGED = "fairy-tales:plan:changed";
+/** Emitted when a fairy-tales feature sets the clipboard itself (so the
+ * clipboard watcher doesn't double-notify). Payload: { text: string }. */
+export const CLIP_MARK = "fairy-tales:clip:mark";
 
 export interface RunSummary {
   id: string;

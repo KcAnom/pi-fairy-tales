@@ -70,8 +70,12 @@ export interface FairyTalesConfig {
     /** Role used for execution (edits/writes). */
     buildRole: string;
   };
-  /** Internal UI state persisted by the brand extension (previousTheme, etc.). */
-  ui?: { previousTheme?: string };
+  /** UI preferences + internal state persisted by the brand extension. */
+  ui?: {
+    previousTheme?: string;
+    /** Toast when the system clipboard changes (drag-copy confirmation). Default true. */
+    clipboardNotify?: boolean;
+  };
 }
 
 export function expandHome(p: string): string {

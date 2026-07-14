@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.0 — 2026-07-14
+
+**New capability**
+- **Clipboard toasts** — terminal copy-on-select is silent by design (the terminal never tells the app), so fairy-tales now watches the system clipboard and toasts "⧉ Copied to clipboard (N lines · M chars)" when it changes. Privacy: counts only, never content; nothing stored or sent. `/grab`'s own copies don't double-toast. Disable with `ui.clipboardNotify: false`. Verified live in a running session.
+- **`ftales.app` (macOS)** — `install.sh` creates `~/Applications/ftales.app`: Spotlight → "ftales" → Enter launches Fairy Tales directly in a terminal window (iTerm2 if present, else Terminal.app). The `.command` handoff it uses rebinds stdout to the tty (some terminals pipe it, which kills a TUI) and self-deletes via a delayed background job (the file is read incrementally).
+
+**Changed**
+- **Removed 0.9.0's iTerm2 handoff from the `ftales` launcher, reverting to the simple launcher.** It was built on a wrong assumption: recent macOS Terminal.app *does* auto-copy mouse selections (verified empirically), so rerouting sessions to iTerm2 was unnecessary window churn. `/doctor`'s terminal check now informs instead of asserting, and `install.sh` no longer offers to install iTerm2.
+
 ## 0.9.0 — 2026-07-14
 
 **Changed**

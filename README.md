@@ -94,6 +94,8 @@ If a tier model is ever unavailable, subagents fall back to your session model w
 | `artifact` tool | Produce a polished, self-contained, theme-aware HTML document (report / roadmap / dashboard) and open it in the browser. Backed by the `artifact` design skill. |
 | Input shortcuts | `??` ask-mode (answer read-only this turn), `>>` verbatim. |
 | `/grab` | Picker over recent code blocks, responses, and tool outputs → clipboard as clean logical text (no terminal wrapping, no UI decoration). Complements pi's built-in `/copy` (last message). Uses `pbcopy`/`wl-copy`/`xclip`/`clip`, falling back to OSC 52 (works over SSH). |
+| Clipboard toasts | A toast whenever the system clipboard changes while the TUI runs — so terminal drag-copy (silent by design) gets visible confirmation. Counts only, never content. Disable: `ui.clipboardNotify: false`. |
+| `ftales.app` (macOS) | Created by `install.sh` in `~/Applications`: Spotlight → "ftales" launches Fairy Tales directly in a terminal window (iTerm2 if present, else Terminal.app) — no shell session wasted getting there. |
 | Skills | `deep-review`, `handoff`, `ship`, `artifact`. |
 | Prompts | `/commit`, `/review`, `/plan-task`, `/standup`. |
 | `/grimoire` | Scrollable on-demand catalog of installed skills / prompts / extensions / themes in a book overlay. Pairs with pi's `quietStartup` so startup is clean. Works in plain pi and `ftales`. |

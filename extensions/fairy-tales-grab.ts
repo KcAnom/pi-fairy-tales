@@ -9,6 +9,7 @@
 import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isNested } from "../src/config.ts";
+import { CLIP_MARK } from "../src/bus.ts";
 
 function extractText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -80,6 +81,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       const doCopy = async (text: string, what: string) => {
+        pi.events.emit(CLIP_MARK, { text }); // clipwatch: this change is ours, don't double-toast
         const via = await copyToClipboard(text);
         const lines = text.split("\n").length;
         ctx.ui.notify(

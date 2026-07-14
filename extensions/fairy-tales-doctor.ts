@@ -133,14 +133,15 @@ export default function (pi: ExtensionAPI) {
       }
 
       // Terminal ergonomics: copy-on-select (drag → release → clipboard) is a
-      // terminal-emulator feature, not an app feature — flag hosts that lack it.
+      // terminal-emulator feature, not an app feature. Whether a host supports
+      // it can't be probed, so inform rather than assert.
       const termProgram = process.env.TERM_PROGRAM ?? "";
       if (process.platform === "darwin" && termProgram === "Apple_Terminal") {
         checks.push({
-          verdict: "warn",
+          verdict: "ok",
           label: "Terminal",
           detail:
-            "Terminal.app can't auto-copy mouse selections — brew install --cask iterm2 (copy-on-select is on by default there)",
+            "Terminal.app — drag-select auto-copies on recent macOS; if yours doesn't, iTerm2 has copy-on-select built in",
         });
       } else if (process.platform === "darwin" && termProgram === "iTerm.app") {
         let copyOn = true; // iTerm2's default
