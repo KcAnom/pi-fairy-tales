@@ -6,7 +6,7 @@
   },
   "agents": {
     "maxConcurrent": 5,
-    "maxTurnsPerRun": 50,
+    "maxTurnsPerRun": 20,
     "maxCostPerRunUsd": 1.5,
     "modelMode": "single",
     "singleModel": "session",
@@ -54,6 +54,6 @@
     "postEdit": { "testCommandFile": ".pi/test-command", "enabled": true, "timeoutMs": 120000 }
   },
   "web": { "timeoutMs": 20000, "maxBytes": 51200, "blockPrivateHosts": true },
-  "compaction": { "tier": "scout", "proactiveAtPercent": 85 },
+  "compaction": { "tier": "scout", "proactiveAtPercent": 90 },
   "ultraplan": { "planners": 1, "worktree": true, "autoExecute": false, "planRole": "plan", "buildRole": "build" }
 }

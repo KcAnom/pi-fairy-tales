@@ -208,6 +208,32 @@ export function resolveTierModel(
   return { model, thinkingLevel: tier.thinkingLevel };
 }
 
+/**
+ * Cheapest available model by blended price (input weighted 3:1 over output —
+ * scout-style work is read-heavy). Models with no reported pricing (both rates 0,
+ * e.g. local models) are skipped: zero can mean "unknown" and silently routing
+ * work to a tiny local model is worse than the session-model fallback.
+ * Returns undefined when nothing priced is available.
+ */
+export function resolveCheapestModel(modelRegistry: {
+  getAvailable?(): Array<{ provider: string; id: string; cost?: { input?: number; output?: number } }>;
+}): { model: unknown; id: string } | undefined {
+  try {
+    const models = modelRegistry.getAvailable?.() ?? [];
+    let best: { model: unknown; id: string; price: number } | undefined;
+    for (const m of models) {
+      const input = m.cost?.input ?? 0;
+      const output = m.cost?.output ?? 0;
+      if (input <= 0 && output <= 0) continue;
+      const price = input * 3 + output;
+      if (!best || price < best.price) best = { model: m, id: `${m.provider}/${m.id}`, price };
+    }
+    return best ? { model: best.model, id: best.id } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** True when this extension instance is running inside a fairy-tales subagent. */
 export function isNested(): boolean {
   return ((globalThis as Record<string, unknown>).__fairyTalesDepth as number | undefined ?? 0) > 0;

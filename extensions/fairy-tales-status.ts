@@ -5,7 +5,7 @@
  * emitted by the subagent engine.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { isNested, loadFairyTalesConfig, loadDiagnostics } from "../src/config.ts";
+import { isNested, loadFairyTalesConfig, loadDiagnostics, resolveTierModel } from "../src/config.ts";
 import { AGENTS_STATUS, COST_ADD, type AgentsStatusPayload, type CostAddPayload } from "../src/bus.ts";
 import { fmtUsd } from "../src/text.ts";
 import { estimateCostUsd } from "../src/util.ts";
@@ -38,9 +38,30 @@ export default function (pi: ExtensionAPI) {
     render = () => update(ctx);
     update(ctx);
     // Surface config problems (unknown tier, dropped guard, parse error) once.
-    loadFairyTalesConfig(ctx.cwd);
+    const cfg = loadFairyTalesConfig(ctx.cwd);
     if (ctx.hasUI && loadDiagnostics.length) {
       for (const d of loadDiagnostics.slice(0, 4)) ctx.ui.notify(`⚠ fairy-tales config: ${d}`, "warning");
+    }
+    // Warn when tier models this session would actually use don't resolve — that
+    // work silently falls back (scout → cheapest priced model, other tiers → the
+    // session model), which is the #1 hidden token cost.
+    if (ctx.hasUI) {
+      const referenced = new Set<string>();
+      if (cfg.agents?.modelMode === "tiered") {
+        for (const role of Object.values(cfg.agents.roles ?? {})) referenced.add(role.tier);
+      }
+      if (cfg.compaction?.tier) referenced.add(cfg.compaction.tier);
+      const unresolved = [...referenced].filter(
+        (t) => cfg.tiers?.[t]?.model && !resolveTierModel(ctx.modelRegistry, cfg, t),
+      );
+      if (unresolved.length) {
+        ctx.ui.notify(
+          `⚠ fairy-tales: tier model${unresolved.length > 1 ? "s" : ""} not available: ${unresolved
+            .map((t) => `${t} (${cfg.tiers[t].model})`)
+            .join(", ")} — run /agent-model to pick from your models`,
+          "warning",
+        );
+      }
     }
   });
 

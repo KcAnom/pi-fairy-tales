@@ -22,7 +22,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { FairyTalesConfig, RoleConfig } from "../config.ts";
-import { resolveTierModel } from "../config.ts";
+import { resolveCheapestModel, resolveTierModel } from "../config.ts";
 import type { RunSummary } from "../bus.ts";
 import { buildRolePrompt, composeTask } from "./prompts.ts";
 import { clipTail, fmtDuration, fmtTokens, fmtUsd, slugify } from "../text.ts";
@@ -63,7 +63,10 @@ export interface SpawnOptions {
   name?: string;
   background: boolean;
   cwd: string;
-  modelRegistry: { find(provider: string, id: string): unknown };
+  modelRegistry: {
+    find(provider: string, id: string): unknown;
+    getAvailable?(): Array<{ provider: string; id: string; cost?: { input?: number; output?: number } }>;
+  };
   fallbackModel: unknown;
   /** Ignore tier/single config and run on fallbackModel (the session model). Used by /ultraplan. */
   forceSessionModel?: boolean;
@@ -243,7 +246,18 @@ export class AgentRunner {
     }
     const resolved = resolveTierModel(opts.modelRegistry, cfg, role.tier);
     if (!resolved) {
-      warnings.push(`Tier "${role.tier}" model unavailable — ran on the lead session's model. Check tiers in config.`);
+      // Scout work is high-volume/low-stakes: falling back to the expensive
+      // session model is the worst outcome, so try the cheapest priced model first.
+      if (role.tier === "scout") {
+        const cheapest = resolveCheapestModel(opts.modelRegistry);
+        if (cheapest) {
+          warnings.push(
+            `Tier "scout" model unavailable — ran on cheapest available model ${cheapest.id}. Set it with /agent-model.`,
+          );
+          return { model: cheapest.model, thinkingLevel: cfg.tiers?.[role.tier]?.thinkingLevel };
+        }
+      }
+      warnings.push(`Tier "${role.tier}" model unavailable — ran on the lead session's model. Fix with /agent-model.`);
     }
     return resolved;
   }

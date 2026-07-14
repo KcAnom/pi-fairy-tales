@@ -14,7 +14,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { isNested, loadFairyTalesConfig, resolveTierModel } from "../src/config.ts";
+import { isNested, loadFairyTalesConfig, resolveCheapestModel, resolveTierModel } from "../src/config.ts";
 import { clipTail } from "../src/text.ts";
 import { emptyAgentDir, debug } from "../src/util.ts";
 
@@ -54,10 +54,16 @@ export default function (pi: ExtensionAPI) {
         ? `\n\n[Previous summary to merge]:\n${preparation.previousSummary}`
         : "";
 
-      // Summarize on the configured cheap tier when available (falls back to lead model).
+      // Summarize on the configured cheap tier when available; if the tier does
+      // not resolve, prefer the cheapest priced model over the expensive lead model.
       const cfg = loadFairyTalesConfig(ctx.cwd);
       const tierName = cfg.compaction?.tier;
-      const tier = tierName ? resolveTierModel(ctx.modelRegistry, cfg, tierName) : undefined;
+      const tier =
+        (tierName ? resolveTierModel(ctx.modelRegistry, cfg, tierName) : undefined) ??
+        (() => {
+          const cheapest = resolveCheapestModel(ctx.modelRegistry);
+          return cheapest ? { model: cheapest.model, thinkingLevel: "low" } : undefined;
+        })();
 
       const loader = new DefaultResourceLoader({
         cwd: ctx.cwd,

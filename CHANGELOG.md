@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 — 2026-07-14
+
+Token-economy release: the cost of running fairy-tales is now visible, configurable from the TUI, and frugal by default.
+
+**Changed**
+- **No more silent expensive fallback.** When a tier a session would actually use (subagent roles in tiered mode, the compaction tier) doesn't resolve to an available model, a session-start warning names the broken tier and points to `/agent-model`. Previously that work silently ran on the lead session's model — the #1 hidden token cost.
+- **`/agent-model` is now a tier wizard.** "Tiered" walks scout/worker/brain (and custom tiers), listing *your* available models with their per-Mtok prices (or "free/local"), plus a "Keep current" option when the tier already resolves. Esc anywhere cancels without saving. Picks persist to `~/.pi/agent/fairy-tales.json`.
+- **Cheapest-model fallback for scout work.** When the scout tier is unconfigured, scout subagents, compaction summaries, and `/tale` fall back to the cheapest *priced* model available instead of the session model (new `resolveCheapestModel`, input-weighted 3:1). Zero-cost models (local, unknown pricing) are deliberately skipped — silently routing work to a tiny local model is worse than the session-model fallback.
+- **Frugal shipped defaults**: `agents.maxTurnsPerRun` 50 → 20, `compaction.proactiveAtPercent` 85 → 90.
+
 ## 0.3.0 — 2026-07-09
 
 **New capability**

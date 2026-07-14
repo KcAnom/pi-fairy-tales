@@ -1,6 +1,6 @@
 {
   "name": "pi-fairy-tales",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Fairy-Tales-class harness for pi: subagents, memory, plan mode, ultraplan, hooks, todos, smart compaction, status line, web fetch, artifacts",
   "type": "module",
   "keywords": [

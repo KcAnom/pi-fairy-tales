@@ -17,7 +17,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { wrapTextWithAnsi, Text } from "@earendil-works/pi-tui";
-import { isNested, loadFairyTalesConfig, resolveTierModel } from "../src/config.ts";
+import { isNested, loadFairyTalesConfig, resolveCheapestModel, resolveTierModel } from "../src/config.ts";
 import { renderMasthead, closeOverlay } from "../src/banner.ts";
 import { bookOverlay } from "../src/overlay.ts";
 import { AGENTS_STATUS, COST_ADD, type AgentsStatusPayload, type CostAddPayload } from "../src/bus.ts";
@@ -230,7 +230,12 @@ export default function (pi: ExtensionAPI) {
       try {
         const conversation = serializeConversation(convertToLlm(messages as never));
         const cfg = loadFairyTalesConfig(ctx.cwd);
-        const tier = cfg.compaction?.tier ? resolveTierModel(ctx.modelRegistry, cfg, cfg.compaction.tier) : undefined;
+        const tier =
+          (cfg.compaction?.tier ? resolveTierModel(ctx.modelRegistry, cfg, cfg.compaction.tier) : undefined) ??
+          (() => {
+            const cheapest = resolveCheapestModel(ctx.modelRegistry);
+            return cheapest ? { model: cheapest.model, thinkingLevel: "low" } : undefined;
+          })();
         const loader = new DefaultResourceLoader({
           cwd: ctx.cwd,
           agentDir: emptyAgentDir(),

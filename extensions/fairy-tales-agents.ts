@@ -10,7 +10,7 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
-import { loadFairyTalesConfig, saveUserConfig, isNested, roleNames, type FairyTalesConfig } from "../src/config.ts";
+import { loadFairyTalesConfig, resolveTierModel, saveUserConfig, isNested, roleNames, type FairyTalesConfig } from "../src/config.ts";
 import { AgentRunner } from "../src/subagent/engine.ts";
 import { AGENTS_STATUS, COST_ADD, type RunSummary } from "../src/bus.ts";
 import { fmtDuration, fmtUsd, fmtTokens } from "../src/text.ts";
@@ -233,8 +233,15 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // What each shipped tier is for — shown in the wizard so the choice is informed.
+  const TIER_HINT: Record<string, string> = {
+    scout: "cheap & fast: exploration, compaction summaries",
+    worker: "your main model: implementation",
+    brain: "your best model: planning, review",
+  };
+
   pi.registerCommand("agent-model", {
-    description: "Choose how subagents pick models: tiered per role, or one model for all",
+    description: "Set subagent models: a wizard to pick a model per tier, or one model for all",
     handler: async (_args, ctx) => {
       const current = loadFairyTalesConfig(ctx.cwd);
       const mode =
@@ -242,22 +249,55 @@ export default function (pi: ExtensionAPI) {
           ? `single (${current.agents.singleModel === "session" ? "follows session model" : current.agents.singleModel})`
           : "tiered (per role)";
 
-      const TIERED = "Tiered — per-role models from config";
+      const TIERED = "Tiered — pick a model per tier (recommended: saves tokens)";
       const SESSION = "Single — always follow my session model";
       const available =
-        (await (ctx.modelRegistry as { getAvailable(): Promise<Array<{ provider: string; id: string }>> })
-          .getAvailable()) ?? [];
+        ((await (
+          ctx.modelRegistry as unknown as {
+            getAvailable(): Array<{ provider: string; id: string; cost?: { input?: number; output?: number } }>;
+          }
+        ).getAvailable()) as Array<{ provider: string; id: string; cost?: { input?: number; output?: number } }>) ??
+        [];
       const modelItems = available.map((m) => `Single — ${m.provider}/${m.id}`);
 
       const choice = await ctx.ui.select(`Subagent model mode (now: ${mode})`, [TIERED, SESSION, ...modelItems]);
       if (choice === undefined) return;
 
+      if (choice === TIERED) {
+        // Wizard: one pick per tier from the user's own available models, with
+        // pricing shown so "cheap" is a fact and not a guess. Esc anywhere cancels
+        // the whole wizard without saving.
+        const priceOf = (m: { cost?: { input?: number; output?: number } }) => {
+          const i = m.cost?.input ?? 0;
+          const o = m.cost?.output ?? 0;
+          return i <= 0 && o <= 0 ? "free/local" : `$${i}/$${o} per Mtok`;
+        };
+        const modelChoices = available.map((m) => `${m.provider}/${m.id} — ${priceOf(m)}`);
+        const tiers: Record<string, { model: string; thinkingLevel?: string }> = {};
+        for (const [name, tier] of Object.entries(current.tiers ?? {})) {
+          const resolvedNow = resolveTierModel(ctx.modelRegistry, current, name);
+          const keep = resolvedNow ? [`Keep current — ${tier.model}`] : [];
+          const hint = TIER_HINT[name] ?? "custom tier";
+          const pick = await ctx.ui.select(`Model for "${name}" tier (${hint})`, [...keep, ...modelChoices]);
+          if (pick === undefined) return; // cancelled — save nothing
+          const idx = modelChoices.indexOf(pick);
+          if (idx >= 0) {
+            const m = available[idx];
+            tiers[name] = { model: `${m.provider}/${m.id}`, thinkingLevel: tier.thinkingLevel };
+          }
+        }
+        const path = await saveUserConfig({ tiers, agents: { modelMode: "tiered" } });
+        cfg = loadFairyTalesConfig(ctx.cwd);
+        const summary = Object.entries(cfg.tiers ?? {})
+          .map(([n, t]) => `${n}=${t.model}`)
+          .join(", ");
+        ctx.ui.notify(`Subagent models: tiered — ${summary} (saved to ${path})`, "info");
+        return;
+      }
+
       let patch: { agents: { modelMode: string; singleModel?: string } };
       let label: string;
-      if (choice === TIERED) {
-        patch = { agents: { modelMode: "tiered" } };
-        label = "tiered (per role)";
-      } else if (choice === SESSION) {
+      if (choice === SESSION) {
         patch = { agents: { modelMode: "single", singleModel: "session" } };
         label = "single: session model";
       } else {
