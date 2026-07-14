@@ -141,7 +141,7 @@ export default function (pi: ExtensionAPI) {
           verdict: "ok",
           label: "Terminal",
           detail:
-            "Terminal.app — drag-select auto-copies on recent macOS; if yours doesn't, iTerm2 has copy-on-select built in",
+            "Terminal.app — for in-TUI copy-on-select, make sure View → Allow Mouse Reporting is enabled",
         });
       } else if (process.platform === "darwin" && termProgram === "iTerm.app") {
         let copyOn = true; // iTerm2's default

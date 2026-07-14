@@ -75,6 +75,8 @@ export interface FairyTalesConfig {
     previousTheme?: string;
     /** Toast when the system clipboard changes (drag-copy confirmation). Default true. */
     clipboardNotify?: boolean;
+    /** In-TUI copy-on-select: drag with the mouse, release, selection is copied. Default true. */
+    copyOnSelect?: boolean;
   };
 }
 

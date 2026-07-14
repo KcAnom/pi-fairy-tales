@@ -3,6 +3,7 @@
 ## 0.10.0 — 2026-07-14
 
 **New capability**
+- **Copy-on-select inside the TUI** — drag-select with the mouse; on release the selection is extracted from the renderer's frame and copied to the clipboard, with a toast. Implemented the way Claude Code's fullscreen mode does it: SGR mouse tracking (1002/1006) enabled while the session runs, events intercepted before the editor, selection sliced from the last rendered frame (ANSI-stripped), modes restored on shutdown and process exit. Wheel and non-left-button events are consumed so they never leak into the editor. Requires the terminal to deliver mouse reporting (Terminal.app: View → Allow Mouse Reporting). No live highlight yet; wide glyphs may offset a slice. Disable with `ui.copyOnSelect: false`.
 - **Clipboard toasts** — terminal copy-on-select is silent by design (the terminal never tells the app), so fairy-tales now watches the system clipboard and toasts "⧉ Copied to clipboard (N lines · M chars)" when it changes. Privacy: counts only, never content; nothing stored or sent. `/grab`'s own copies don't double-toast. Disable with `ui.clipboardNotify: false`. Verified live in a running session.
 - **`ftales.app` (macOS)** — `install.sh` creates `~/Applications/ftales.app`: Spotlight → "ftales" → Enter launches Fairy Tales directly in a terminal window (iTerm2 if present, else Terminal.app). The `.command` handoff it uses rebinds stdout to the tty (some terminals pipe it, which kills a TUI) and self-deletes via a delayed background job (the file is read incrementally).
 
