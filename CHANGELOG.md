@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.0 — 2026-07-14
+
+**Changed**
+- **`ftales` hands itself to iTerm2.** When launched from macOS Terminal.app (which cannot copy-on-select) with iTerm2 installed, the launcher reopens the session in a new iTerm2 window — via a self-deleting `.command` handoff file that needs **no automation permissions** — so drag-select → release → clipboard just works. Preserves the working directory. Opt out per launch or permanently with `FTALES_NO_ITERM=1`; skipped automatically when arguments are passed or output isn't a terminal.
+
 ## 0.8.0 — 2026-07-14
 
 **Changed**

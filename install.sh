@@ -14,7 +14,36 @@ pi install "$PKG_DIR"
 
 # Create the branded launcher in ~/bin (survives Node upgrades).
 mkdir -p "$HOME/bin"
-printf '#!/bin/sh\n# Fairy Tales — branded pi launcher\nexport FTALES=1\nexec pi "$@"\n' > "$HOME/bin/ftales"
+cat > "$HOME/bin/ftales" <<'FTALES_LAUNCHER'
+#!/bin/sh
+# Fairy Tales — branded pi launcher (lives in ~/bin, survives Node upgrades)
+export FTALES=1
+
+# Terminal.app can't copy-on-select. If iTerm2 is installed, hand this session
+# to a new iTerm2 window (via a self-deleting .command file — no automation
+# permissions needed) so drag-select → release → clipboard just works.
+# Opt out: FTALES_NO_ITERM=1. Skipped when args are given.
+if [ "${TERM_PROGRAM:-}" = "Apple_Terminal" ] && [ -d "/Applications/iTerm.app" ] \
+  && [ -z "${FTALES_NO_ITERM:-}" ] && [ $# -eq 0 ] && [ -t 1 ]; then
+  PI_BIN="$(command -v pi)" || PI_BIN=""
+  if [ -n "$PI_BIN" ]; then
+    # Single-quote a string for safe embedding in a generated sh script.
+    sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+    HANDOFF="${TMPDIR:-/tmp}/ftales-handoff-$$.command"
+    {
+      printf '#!/bin/sh\n'
+      printf 'rm -f "$0"\n'
+      printf 'cd %s || exit 1\n' "$(sq "$PWD")"
+      printf 'FTALES=1 exec %s\n' "$(sq "$PI_BIN")"
+    } > "$HANDOFF"
+    chmod +x "$HANDOFF"
+    echo "✦ Reopening in iTerm2 (copy-on-select works there). FTALES_NO_ITERM=1 to stay here."
+    exec open -a iTerm "$HANDOFF"
+  fi
+fi
+
+exec pi "$@"
+FTALES_LAUNCHER
 chmod +x "$HOME/bin/ftales"
 
 case ":$PATH:" in
