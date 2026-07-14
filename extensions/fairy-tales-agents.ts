@@ -10,7 +10,8 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
-import { loadFairyTalesConfig, resolveTierModel, saveUserConfig, isNested, roleNames, type FairyTalesConfig } from "../src/config.ts";
+import { loadFairyTalesConfig, resolveCheapestModel, resolveTierModel, saveUserConfig, isNested, roleNames, type FairyTalesConfig } from "../src/config.ts";
+import { bookOverlay } from "../src/overlay.ts";
 import { AgentRunner } from "../src/subagent/engine.ts";
 import { AGENTS_STATUS, COST_ADD, type RunSummary } from "../src/bus.ts";
 import { fmtDuration, fmtUsd, fmtTokens } from "../src/text.ts";
@@ -308,6 +309,94 @@ export default function (pi: ExtensionAPI) {
       const path = await saveUserConfig(patch);
       cfg = loadFairyTalesConfig(ctx.cwd);
       ctx.ui.notify(`Subagent models: ${label} (saved to ${path})`, "info");
+    },
+  });
+
+  pi.registerCommand("agent-models", {
+    description: "Show the current subagent model setup: mode, tiers, per-role effective models, compaction",
+    handler: async (_args, ctx) => {
+      if (!ctx.hasUI) return;
+      const cfg = loadFairyTalesConfig(ctx.cwd);
+      const sessionModel = (ctx.model as { id?: string } | undefined)?.id ?? "(session model)";
+      const cheapest = resolveCheapestModel(ctx.modelRegistry);
+
+      // Effective model for a role, mirroring the engine's resolution exactly.
+      const effectiveFor = (tierName: string): { model: string; note?: string } => {
+        if (cfg.agents.modelMode === "single") {
+          const single = cfg.agents.singleModel;
+          if (!single || single === "session") return { model: sessionModel, note: "follows session" };
+          const slash = single.indexOf("/");
+          const found = slash > 0 ? ctx.modelRegistry.find(single.slice(0, slash), single.slice(slash + 1)) : undefined;
+          return found ? { model: single } : { model: sessionModel, note: `"${single}" unavailable → session` };
+        }
+        const resolved = resolveTierModel(ctx.modelRegistry, cfg, tierName);
+        if (resolved) return { model: cfg.tiers[tierName].model };
+        if (tierName === "scout" && cheapest) return { model: cheapest.id, note: "tier unavailable → cheapest" };
+        return { model: sessionModel, note: "tier unavailable → session" };
+      };
+
+      await ctx.ui.custom(
+        (
+          tui: unknown,
+          theme: { fg(c: string, s: string): string; bold(s: string): string },
+          _kb: unknown,
+          done: (v: undefined) => void,
+        ) => {
+          const ok = (s: string) => theme.fg("success", s);
+          const warn = (s: string) => theme.fg("warning", s);
+          const mut = (s: string) => theme.fg("muted", s);
+          const lines: string[] = [];
+
+          const modeLabel =
+            cfg.agents.modelMode === "single"
+              ? `single — ${cfg.agents.singleModel === "session" ? `follows session (${sessionModel})` : cfg.agents.singleModel}`
+              : "tiered — per-role tier models";
+          lines.push(`${theme.bold("Mode".padEnd(14))} ${modeLabel}`);
+          lines.push(`${theme.bold("Session model".padEnd(14))} ${sessionModel}`);
+          lines.push("");
+
+          lines.push(theme.bold("Tiers"));
+          for (const [name, tier] of Object.entries(cfg.tiers ?? {})) {
+            const resolved = resolveTierModel(ctx.modelRegistry, cfg, name);
+            const mark = resolved ? ok("✓") : warn("✗");
+            lines.push(
+              `  ${mark} ${name.padEnd(8)} ${tier.model}${mut(` · thinking ${tier.thinkingLevel ?? "default"}`)}${
+                resolved ? "" : warn("  (not available)")
+              }`,
+            );
+          }
+          lines.push("");
+
+          lines.push(theme.bold("Roles → effective model"));
+          for (const [role, rc] of Object.entries(cfg.agents.roles ?? {})) {
+            const eff = effectiveFor(rc.tier);
+            lines.push(
+              `  ${role.padEnd(9)} ${mut(`[${rc.tier}]`)} ${eff.model}${eff.note ? warn(`  · ${eff.note}`) : ""}`,
+            );
+          }
+          lines.push("");
+
+          if (cfg.compaction?.tier) {
+            const eff = effectiveFor(cfg.compaction.tier);
+            lines.push(
+              `${theme.bold("Compaction".padEnd(14))} tier "${cfg.compaction.tier}" → ${eff.model}${eff.note ? warn(`  · ${eff.note}`) : ""}${mut(
+                ` · proactive at ${cfg.compaction.proactiveAtPercent ?? "—"}%`,
+              )}`,
+            );
+          }
+          lines.push(`${theme.bold("Ultraplan".padEnd(14))} always the session model (${sessionModel})`);
+          lines.push("");
+          lines.push(
+            mut(
+              `Caps: ${cfg.agents.maxConcurrent} concurrent · ${cfg.agents.maxTurnsPerRun} turns/run · $${cfg.agents.maxCostPerRunUsd}/run  —  change models with /agent-model`,
+            ),
+          );
+
+          const title = process.env.FTALES === "1" ? "❦ The Fae Council Roster ❦" : "Subagent Models";
+          return bookOverlay({ title, contentLines: lines, tui, theme, done });
+        },
+        { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },
+      );
     },
   });
 

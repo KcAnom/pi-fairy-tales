@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.0 — 2026-07-14
+
+**New capability**
+- **`/agent-models`** — a read-only roster overlay of the current subagent setup: mode, each tier's model with live availability (✓/✗), every role's **effective** model (mirroring the engine's exact resolution, including scout's cheapest-model fallback), the compaction tier, ultraplan's session-model rule, and the spend caps. `/agent-model` (singular) remains the setter.
+
+**Fixed**
+- **Scrolling is back.** The mouse wheel now scrolls book overlays directly (`/tale`, `/grimoire`, `/ledger`, `/doctor` — wheel events are translated to their `j`/`k` keys), and in the main view a wheel tick **releases mouse tracking back to the terminal**, so native scrollback scrolling — and native selection while you're up there — works; any keypress re-arms mouse select. A one-time hint explains the handoff.
+
 ## 0.10.0 — 2026-07-14
 
 **New capability**

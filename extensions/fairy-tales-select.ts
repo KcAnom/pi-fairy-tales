@@ -9,9 +9,11 @@
  *   gates it behind View → Allow Mouse Reporting).
  * - Live highlight: the selection is overdrawn in reverse video while dragging
  *   and restored from the render buffer on change/release.
- * - Wheel and non-left-button events are consumed so they never leak into the
- *   editor as garbage; wheel scrolling inside a mouse-reporting terminal is
- *   traded away — disable with ui.copyOnSelect: false to get it back.
+ * - Wheel: inside an overlay it scrolls the overlay (translated to j/k); in
+ *   the main view a wheel tick releases mouse tracking so native terminal
+ *   scrollback scrolling (and native selection) works, and any keypress
+ *   re-arms tracking. Non-left-button events are consumed so they never leak
+ *   into the editor as garbage.
  * - Column math treats characters as width 1 after ANSI stripping; wide glyphs
  *   (CJK, emoji) can offset a slice by a column or two.
  */
@@ -63,7 +65,7 @@ export default function (pi: ExtensionAPI) {
 
   type Tui = {
     terminal: { write(data: string): void; rows?: number };
-    addInputListener(l: (data: string) => { consume?: boolean } | undefined): () => void;
+    addInputListener(l: (data: string) => { consume?: boolean; data?: string } | undefined): () => void;
     requestRender?(force?: boolean): void;
     hasOverlay?(): boolean;
   };
@@ -90,6 +92,8 @@ export default function (pi: ExtensionAPI) {
   let tui: Tui | undefined;
   let unsub: (() => void) | undefined;
   let enabled = false;
+  let active = false; // feature on for this session (config + UI)
+  let scrollHintShown = false;
   let notify: ((msg: string) => void) | undefined;
   let anchor: Point | undefined;
   let head: Point | undefined;
@@ -316,9 +320,15 @@ export default function (pi: ExtensionAPI) {
     // Keep the highlight + selection alive until the next keypress.
   };
 
-  const onInput = (data: string): { consume?: boolean } | undefined => {
+  const onInput = (data: string): { consume?: boolean; data?: string } | undefined => {
     const m = SGR_MOUSE.exec(data);
     if (!m) {
+      // Keyboard input re-arms mouse tracking after a wheel handed it back to
+      // the terminal for native scrollback (typing = "I'm interacting again").
+      if (active && !enabled && tui) {
+        enabled = true;
+        tui.terminal.write(ENABLE);
+      }
       // Keyboard input while an editor selection is active: ⌫/⌦ deletes it,
       // anything else clears it and proceeds normally.
       if (editorSel && !editorDragging) {
@@ -336,7 +346,30 @@ export default function (pi: ExtensionAPI) {
     const col = Number(m[2]);
     const row = Number(m[3]);
     const release = m[4] === "m";
-    if (btn & 64) return { consume: true }; // wheel — swallow, never editor garbage
+    if (btn & 64) {
+      // Wheel. In an overlay: scroll it (the book overlays understand j/k).
+      // In the main view: hand the mouse back to the terminal so native
+      // scrollback scrolling works; any keypress re-arms tracking.
+      if (tui?.hasOverlay?.()) {
+        return { data: (btn & 3) === 0 ? "k" : "j" };
+      }
+      clearEditorSelection();
+      anchor = head = undefined;
+      paint(true);
+      if (enabled) {
+        enabled = false;
+        try {
+          tui?.terminal.write(DISABLE);
+        } catch {
+          process.stdout.write(DISABLE);
+        }
+        if (!scrollHintShown) {
+          scrollHintShown = true;
+          notify?.("🖱 wheel freed for scrolling — any key re-arms mouse select");
+        }
+      }
+      return { consume: true };
+    }
     const isLeft = (btn & 3) === 0;
     const isMotion = (btn & 32) !== 0;
     if (release) {
@@ -378,11 +411,13 @@ export default function (pi: ExtensionAPI) {
     if (!ctx.hasUI) return;
     const cfg = loadFairyTalesConfig(ctx.cwd);
     if (cfg.ui?.copyOnSelect === false) {
+      active = false;
       unsub?.();
       unsub = undefined;
       disableModes();
       return;
     }
+    active = true;
     notify = (msg) => flashStatus(ctx.ui, "fairy-tales-select", msg);
     // A zero-line widget whose factory hands us the live TUI instance.
     ctx.ui.setWidget(
