@@ -31,3 +31,6 @@ Thumbs.db
 *~
 .idea/
 .vscode/
+
+# Agent working notes (local session memory, not product docs)
+tasks/
