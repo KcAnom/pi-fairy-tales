@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.0 — 2026-07-14
+
+**New capability**
+- **`/copy`** — the last assistant response straight to the clipboard as clean logical text: no terminal line-wrapping, no UI decoration, exactly what the model produced. **`/copy pick`** opens a picker over recent copyable items — each code block (listed first, with language and line count), each response, each tool output. Clipboard via `pbcopy` / `wl-copy` / `xclip` / `xsel` / `clip`, falling back to the OSC 52 escape so it works over SSH too.
+
 ## 0.6.0 — 2026-07-14
 
 No more silence during things that matter.
