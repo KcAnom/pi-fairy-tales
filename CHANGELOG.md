@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0 — 2026-07-14
+
+**Changed**
+- **`/doctor` now checks terminal ergonomics.** Copy-on-select (drag text → release → it's on the clipboard) is a terminal-emulator feature, not an app feature — so the doctor detects the host: warns on macOS Terminal.app (which can't do it) with the iTerm2 one-liner, verifies iTerm2's `CopySelection` setting, notes the `terminal.integrated.copyOnSelection` setting under VS Code, and on Linux checks that a clipboard tool (`wl-copy`/`xclip`/`xsel`) exists for `/grab`.
+- **`install.sh` offers iTerm2 on macOS** — strictly opt-in (interactive prompt, only under Terminal.app, only when Homebrew is present and iTerm2 isn't), enabling copy-on-select on install. Never runs in non-interactive/piped installs.
+
 ## 0.7.1 — 2026-07-14
 
 **Fixed**

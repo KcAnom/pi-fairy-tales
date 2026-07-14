@@ -132,6 +132,54 @@ export default function (pi: ExtensionAPI) {
         });
       }
 
+      // Terminal ergonomics: copy-on-select (drag → release → clipboard) is a
+      // terminal-emulator feature, not an app feature — flag hosts that lack it.
+      const termProgram = process.env.TERM_PROGRAM ?? "";
+      if (process.platform === "darwin" && termProgram === "Apple_Terminal") {
+        checks.push({
+          verdict: "warn",
+          label: "Terminal",
+          detail:
+            "Terminal.app can't auto-copy mouse selections — brew install --cask iterm2 (copy-on-select is on by default there)",
+        });
+      } else if (process.platform === "darwin" && termProgram === "iTerm.app") {
+        let copyOn = true; // iTerm2's default
+        try {
+          const r = await pi.exec("defaults", ["read", "com.googlecode.iterm2", "CopySelection"], { timeout: 8000 });
+          if (r.code === 0) copyOn = r.stdout.trim() !== "0";
+        } catch {
+          /* defaults unavailable — assume default */
+        }
+        checks.push(
+          copyOn
+            ? { verdict: "ok", label: "Terminal", detail: "iTerm2 — drag-select copies on release" }
+            : {
+                verdict: "warn",
+                label: "Terminal",
+                detail: "iTerm2 copy-on-select is OFF — defaults write com.googlecode.iterm2 CopySelection -bool true (then restart iTerm2)",
+              },
+        );
+      } else if (termProgram === "vscode") {
+        checks.push({
+          verdict: "ok",
+          label: "Terminal",
+          detail: "VS Code — for drag-select auto-copy, enable terminal.integrated.copyOnSelection",
+        });
+      } else if (process.platform === "linux") {
+        let clipTool = "";
+        try {
+          const r = await pi.exec("sh", ["-c", "command -v wl-copy || command -v xclip || command -v xsel"], { timeout: 8000 });
+          if (r.code === 0) clipTool = r.stdout.trim().split("/").pop() ?? "";
+        } catch {
+          /* no shell — fall through */
+        }
+        checks.push(
+          clipTool
+            ? { verdict: "ok", label: "Clipboard", detail: `${clipTool} available for /grab` }
+            : { verdict: "warn", label: "Clipboard", detail: "no wl-copy/xclip/xsel — /grab falls back to OSC 52 (terminal support varies)" },
+        );
+      }
+
       // Guard rails.
       checks.push({
         verdict: cfg.hooks.bash.length ? "ok" : "warn",

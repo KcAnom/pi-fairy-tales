@@ -22,6 +22,22 @@ case ":$PATH:" in
   *) echo 'NOTE: add ~/bin to your PATH, e.g.:  echo '\''export PATH="$HOME/bin:$PATH"'\'' >> ~/.zshrc' ;;
 esac
 
+# macOS Terminal.app can't copy-on-select (drag text → released → clipboard).
+# Offer iTerm2 — strictly opt-in, only interactively, and only when brew exists.
+if [ "$(uname)" = "Darwin" ] && [ "${TERM_PROGRAM:-}" = "Apple_Terminal" ] \
+  && [ ! -d "/Applications/iTerm.app" ] && command -v brew >/dev/null 2>&1 && [ -t 0 ]; then
+  printf "\nTerminal.app cannot auto-copy mouse selections. Install iTerm2 (drag-select copies on release)? [y/N] "
+  read -r _ft_ans
+  case "$_ft_ans" in
+    y|Y)
+      brew install --cask iterm2
+      defaults write com.googlecode.iterm2 CopySelection -bool true
+      echo "✓ iTerm2 installed with copy-on-select enabled — run ftales inside iTerm2."
+      ;;
+    *) echo "Skipped. Later:  brew install --cask iterm2  (copy-on-select is on by default)" ;;
+  esac
+fi
+
 echo ""
 echo "✦ Fairy Tales installed."
 echo "  plain harness:  pi"
