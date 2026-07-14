@@ -16,6 +16,8 @@
  *   (CJK, emoji) can offset a slice by a column or two.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { visibleWidth } from "@earendil-works/pi-tui";
+import { wordWrapLine } from "../src/wrap.ts";
 import { isNested, loadFairyTalesConfig } from "../src/config.ts";
 import { CLIP_MARK } from "../src/bus.ts";
 import { flashStatus } from "../src/util.ts";
@@ -62,7 +64,28 @@ export default function (pi: ExtensionAPI) {
   type Tui = {
     terminal: { write(data: string): void; rows?: number };
     addInputListener(l: (data: string) => { consume?: boolean } | undefined): () => void;
+    requestRender?(force?: boolean): void;
+    hasOverlay?(): boolean;
   };
+
+  /** The pi editor's runtime surface (pi-tui Editor internals, duck-typed). */
+  type EditorLike = {
+    getText(): string;
+    setText(text: string): void;
+    getCursor(): { line: number; col: number };
+    state: { lines: string[]; cursorLine: number; cursorCol: number };
+    lastWidth: number;
+    scrollOffset: number;
+    paddingX?: number;
+    setCursorCol?(col: number): void;
+  };
+
+  /** One visual (wrapped) editor line: which logical line and slice it shows. */
+  interface VisualLine {
+    line: number;
+    start: number;
+    text: string;
+  }
 
   let tui: Tui | undefined;
   let unsub: (() => void) | undefined;
@@ -123,6 +146,124 @@ export default function (pi: ExtensionAPI) {
     paint();
   };
 
+  // ---- editor mouse interaction: click places the cursor, drag selects, ⌫ deletes ----
+
+  /** Duck-type the focused component as pi's editor. */
+  const focusedEditor = (): EditorLike | undefined => {
+    const fc = (tui as unknown as { focusedComponent?: unknown })?.focusedComponent as EditorLike | undefined;
+    return fc && typeof fc.getText === "function" && typeof fc.getCursor === "function" && fc.state?.lines
+      ? fc
+      : undefined;
+  };
+
+  /** Rebuild the editor's wrap layout exactly as Editor.layoutText does. */
+  const layoutMap = (ed: EditorLike): VisualLine[] => {
+    const width = Math.max(1, ed.lastWidth || 80);
+    const out: VisualLine[] = [];
+    const lines = ed.state.lines.length ? ed.state.lines : [""];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i] ?? "";
+      if (visibleWidth(line) <= width) {
+        out.push({ line: i, start: 0, text: line });
+      } else {
+        for (const chunk of wordWrapLine(line, width)) {
+          out.push({ line: i, start: chunk.startIndex, text: chunk.text });
+        }
+      }
+    }
+    return out;
+  };
+
+  /** Index of the visual line currently containing the editor cursor. */
+  const cursorVisualIndex = (ed: EditorLike, map: VisualLine[]): number => {
+    for (let i = map.length - 1; i >= 0; i--) {
+      const v = map[i];
+      if (v.line === ed.state.cursorLine && ed.state.cursorCol >= v.start) return i;
+    }
+    return 0;
+  };
+
+  /**
+   * Screen row (1-based) of the first visible editor content line, anchored on
+   * the renderer's hardware-cursor tracking — no string matching against the
+   * frame needed. Returns undefined when the anchor isn't available.
+   */
+  const editorContentTopRow = (ed: EditorLike): number | undefined => {
+    if (!tui) return undefined;
+    const t = tui as unknown as { hardwareCursorRow?: number; previousLines?: string[] };
+    if (typeof t.hardwareCursorRow !== "number" || !Array.isArray(t.previousLines)) return undefined;
+    const height = heightOf(tui);
+    const viewportTop = Math.max(0, t.previousLines.length - height);
+    const cursorScreenRow = t.hardwareCursorRow - viewportTop + 1; // 1-based
+    const cvi = cursorVisualIndex(ed, layoutMap(ed));
+    return cursorScreenRow - (cvi - (ed.scrollOffset ?? 0));
+  };
+
+  /** Map a screen click to a logical editor position, or undefined if outside. */
+  const editorPosAt = (ed: EditorLike, row: number, col: number): { line: number; col: number } | undefined => {
+    const top = editorContentTopRow(ed);
+    if (top === undefined) return undefined;
+    const map = layoutMap(ed);
+    const scroll = ed.scrollOffset ?? 0;
+    const height = heightOf(tui!);
+    const maxVisible = Math.max(5, Math.floor(height * 0.3));
+    const visibleCount = Math.min(map.length - scroll, maxVisible);
+    const vIdx = scroll + (row - top);
+    if (row < top || row >= top + visibleCount || vIdx < 0 || vIdx >= map.length) return undefined;
+    const v = map[vIdx];
+    const padding = ed.paddingX ?? 1;
+    const offset = Math.max(0, col - 1 - padding);
+    return { line: v.line, col: v.start + Math.min(offset, v.text.length) };
+  };
+
+  const setEditorCursor = (ed: EditorLike, pos: { line: number; col: number }) => {
+    ed.state.cursorLine = Math.max(0, Math.min(pos.line, ed.state.lines.length - 1));
+    const lineLen = (ed.state.lines[ed.state.cursorLine] ?? "").length;
+    const col = Math.max(0, Math.min(pos.col, lineLen));
+    if (typeof ed.setCursorCol === "function") ed.setCursorCol(col);
+    else ed.state.cursorCol = col;
+    tui?.requestRender?.();
+  };
+
+  // Active in-editor selection (logical text range), surviving until the next keypress.
+  let editorSel: { ed: EditorLike; a: { line: number; col: number }; b: { line: number; col: number } } | undefined;
+  let editorDragging = false;
+
+  const normalizeSel = (s: NonNullable<typeof editorSel>) => {
+    let { a, b } = s;
+    if (b.line < a.line || (b.line === a.line && b.col < a.col)) [a, b] = [b, a];
+    return { a, b };
+  };
+
+  const editorSelText = (s: NonNullable<typeof editorSel>): string => {
+    const { a, b } = normalizeSel(s);
+    const lines = s.ed.state.lines;
+    if (a.line === b.line) return (lines[a.line] ?? "").slice(a.col, b.col);
+    const parts = [(lines[a.line] ?? "").slice(a.col)];
+    for (let i = a.line + 1; i < b.line; i++) parts.push(lines[i] ?? "");
+    parts.push((lines[b.line] ?? "").slice(0, b.col));
+    return parts.join("\n");
+  };
+
+  const deleteEditorSelection = () => {
+    if (!editorSel) return;
+    const { a, b } = normalizeSel(editorSel);
+    const ed = editorSel.ed;
+    const lines = ed.state.lines.slice();
+    const merged = (lines[a.line] ?? "").slice(0, a.col) + (lines[b.line] ?? "").slice(b.col);
+    lines.splice(a.line, b.line - a.line + 1, merged);
+    ed.setText(lines.join("\n"));
+    setEditorCursor(ed, a);
+    editorSel = undefined;
+    paint(true);
+  };
+
+  const clearEditorSelection = () => {
+    if (!editorSel) return;
+    editorSel = undefined;
+    paint(true);
+  };
+
   const disableModes = () => {
     if (!enabled) return;
     enabled = false;
@@ -155,9 +296,42 @@ export default function (pi: ExtensionAPI) {
     notify?.(`⧉ Copied selection (${lines} line${lines > 1 ? "s" : ""} · ${text.length} chars)`);
   };
 
+  const finishEditorDrag = async () => {
+    editorDragging = false;
+    if (!editorSel) return;
+    const moved = editorSel.a.line !== editorSel.b.line || editorSel.a.col !== editorSel.b.col;
+    if (!moved) {
+      // plain click — cursor already placed
+      editorSel = undefined;
+      anchor = head = undefined;
+      paint(true);
+      return;
+    }
+    const text = editorSelText(editorSel);
+    if (text) {
+      pi.events.emit(CLIP_MARK, { text });
+      await copyToClipboard(text);
+      notify?.(`⧉ Copied ${text.length} chars · press ⌫ to delete the selection`);
+    }
+    // Keep the highlight + selection alive until the next keypress.
+  };
+
   const onInput = (data: string): { consume?: boolean } | undefined => {
     const m = SGR_MOUSE.exec(data);
-    if (!m) return undefined;
+    if (!m) {
+      // Keyboard input while an editor selection is active: ⌫/⌦ deletes it,
+      // anything else clears it and proceeds normally.
+      if (editorSel && !editorDragging) {
+        if (data === "\x7f" || data === "\b" || data === "\x1b[3~") {
+          deleteEditorSelection();
+          anchor = head = undefined;
+          return { consume: true };
+        }
+        clearEditorSelection();
+        anchor = head = undefined;
+      }
+      return undefined;
+    }
     const btn = Number(m[1]);
     const col = Number(m[2]);
     const row = Number(m[3]);
@@ -166,17 +340,34 @@ export default function (pi: ExtensionAPI) {
     const isLeft = (btn & 3) === 0;
     const isMotion = (btn & 32) !== 0;
     if (release) {
-      void finish();
+      if (editorDragging) void finishEditorDrag();
+      else void finish();
       return { consume: true };
     }
     if (isLeft && !isMotion) {
+      clearEditorSelection();
+      // A press inside the editor's content places the cursor and may start
+      // an in-editor selection; anywhere else starts a chat copy-selection.
+      const ed = !tui?.hasOverlay?.() ? focusedEditor() : undefined;
+      const pos = ed ? editorPosAt(ed, row, col) : undefined;
       anchor = { row, col };
       head = { row, col };
-      paint();
+      if (ed && pos) {
+        setEditorCursor(ed, pos);
+        editorSel = { ed, a: pos, b: pos };
+        editorDragging = true;
+      } else {
+        editorDragging = false;
+        paint();
+      }
       return { consume: true };
     }
     if (isLeft && isMotion && anchor) {
       head = { row, col };
+      if (editorDragging && editorSel) {
+        const pos = editorPosAt(editorSel.ed, row, col);
+        if (pos) editorSel.b = pos;
+      }
       paintThrottled();
       return { consume: true };
     }
