@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0 — 2026-07-14
+
+No more silence during things that matter.
+
+**New capability**
+- **`/doctor`** — a health-check overlay for the whole install: tier model resolution (with what each broken tier falls back to), config diagnostics, memory writability, post-edit test wiring, guard-rail counts, git/`gh` prerequisites for `/ultraplan`'s PR path, and spend caps at a glance. Every failing line names its fix.
+
+**Changed**
+- **Compaction announces itself.** Each compaction shows a one-line notice — trigger (manual/proactive/overflow), tokens condensed, approximate summary size, and summarizer cost — instead of happening invisibly.
+- **Subagent retries are visible.** During transient-error backoff the live widget shows `⟳ provider hiccup — retry 1/2 in 1s` instead of appearing hung.
+
 ## 0.5.0 — 2026-07-14
 
 **New capability**

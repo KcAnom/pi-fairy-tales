@@ -16,7 +16,7 @@ import {
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isNested, loadFairyTalesConfig, resolveCheapestModel, resolveTierModel } from "../src/config.ts";
 import { COST_ADD } from "../src/bus.ts";
-import { clipTail } from "../src/text.ts";
+import { clipTail, fmtTokens, fmtUsd } from "../src/text.ts";
 import { emptyAgentDir, debug, estimateCostUsd } from "../src/util.ts";
 
 const SUMMARIZER_PROMPT = `You are a conversation summarizer for a coding agent. You receive a serialized conversation and produce a handoff summary so the agent can continue seamlessly with the older messages removed.
@@ -37,6 +37,10 @@ Rules: be specific (paths, names, commands, error messages). No fluff. If a prev
 
 export default function (pi: ExtensionAPI) {
   if (isNested()) return;
+
+  // Cost of the most recent summarizer pass, consumed by the session_compact
+  // announcement below.
+  let lastSummarizerCost = 0;
 
   pi.on("session_before_compact", async (event, ctx) => {
     const { preparation, signal } = event;
@@ -130,6 +134,7 @@ export default function (pi: ExtensionAPI) {
       } finally {
         unsub();
         if (sumCost > 0 || sumIn > 0 || sumOut > 0) {
+          lastSummarizerCost = sumCost;
           pi.events.emit(COST_ADD, { usd: sumCost, source: "compaction", inputTokens: sumIn, outputTokens: sumOut });
         }
         signal?.removeEventListener("abort", onAbort);
@@ -139,6 +144,20 @@ export default function (pi: ExtensionAPI) {
       debug("compact", "custom compaction failed, falling back to default", err);
       return undefined; // pi's default compaction takes over
     }
+  });
+
+  // Announce every compaction — the single most expensive background event was
+  // previously invisible. Shows what was condensed, roughly what remains, and
+  // what the summarizer pass cost.
+  pi.on("session_compact", async (event, ctx) => {
+    if (!ctx.hasUI) return;
+    const entry = event.compactionEntry as { summary?: string; tokensBefore?: number } | undefined;
+    const before = entry?.tokensBefore ?? 0;
+    const after = Math.round((entry?.summary?.length ?? 0) / 4); // ~4 chars/token
+    const cost = lastSummarizerCost > 0 ? ` · summarizer ${fmtUsd(lastSummarizerCost)}` : "";
+    lastSummarizerCost = 0;
+    const why = event.reason === "overflow" ? " (context overflow)" : event.reason === "threshold" ? " (proactive)" : "";
+    ctx.ui.notify(`📜 Compacted${why}: ${fmtTokens(before)} tokens → ~${fmtTokens(after)} summary${cost}`, "info");
   });
 
   // Proactive compaction: when context crosses the configured threshold, compact

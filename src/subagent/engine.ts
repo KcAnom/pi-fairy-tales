@@ -401,7 +401,11 @@ export class AgentRunner {
         const err = this.lastAssistantError(session);
         if (err && isTransientError(err) && attempt < maxRetries && summary.state === "running") {
           warnings.push(`Transient error (attempt ${attempt + 1}), retrying: ${err.slice(0, 120)}`);
-          await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+          // Show the backoff in the widget — a silent 30s retry reads as a hang.
+          const backoffMs = 800 * (attempt + 1);
+          summary.lastActivity = `⟳ provider hiccup — retry ${attempt + 1}/${maxRetries} in ${Math.round(backoffMs / 1000) || 1}s`;
+          this.emitStatus();
+          await new Promise((r) => setTimeout(r, backoffMs));
           continue;
         }
         break;

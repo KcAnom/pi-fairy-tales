@@ -86,9 +86,10 @@ If a tier model is ever unavailable, subagents fall back to your session model w
 | Hooks | Bash regex + path glob guard rails (`block` / `confirm`, headless fail-safe) that also catch **bash-mediated writes** and normalize quote / `$HOME` evasion. Post-edit hook runs `<project>/.pi/test-command` and steers failures back to self-fix. Active inside subagents. |
 | Checkpoints | `/checkpoints` and `/rollback` — non-destructive git snapshots after edits, so a broken change can return to the last good state. |
 | `todo` tool | Multi-step checklist, widget, state survives restart / fork. |
-| Smart compaction | Structured handoff summaries on a cheap tier, keeping the recent tail; triggers **proactively** at a context threshold; falls back to pi's default on error. Provider overflow errors normalized so compaction engages. |
+| Smart compaction | Structured handoff summaries on a cheap tier, keeping the recent tail; triggers **proactively** at a context threshold; falls back to pi's default on error. Provider overflow errors normalized so compaction engages. Every compaction is **announced** (tokens condensed, summarizer cost) instead of happening silently. |
 | Status line | `model · ctx% · $cost · ⚡agents` (one owner of the vitals). |
 | `/ledger` | Where the session's tokens and cost went: main conversation vs. each subagent vs. compaction summaries vs. `/tale`, with token counts, cache stats, and cost-share bars in a book overlay. Subagent totals survive restarts. |
+| `/doctor` | Health-check the install: do tier models resolve (and what work falls back to), config problems, memory writable, post-edit tests wired, guard rails active, git/`gh` present for `/ultraplan`'s PR path, spend caps. Every failing line comes with its fix. |
 | `fetch` tool | URL → readable text, **SSRF-protected** (blocks private / loopback hosts), streamed to a byte cap. |
 | `artifact` tool | Produce a polished, self-contained, theme-aware HTML document (report / roadmap / dashboard) and open it in the browser. Backed by the `artifact` design skill. |
 | Input shortcuts | `??` ask-mode (answer read-only this turn), `>>` verbatim. |
