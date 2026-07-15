@@ -1,8 +1,12 @@
 {
   "name": "pi-fairy-tales",
-  "version": "0.13.0",
+  "version": "0.14.0-dev",
   "description": "Fairy-Tales-class harness for pi: subagents, memory, plan mode, ultraplan, hooks, todos, smart compaction, status line, web fetch, artifacts",
   "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
   "keywords": [
     "pi-package"
   ],
@@ -42,10 +46,13 @@
     "image": "https://raw.githubusercontent.com/KcAnom/pi-fairy-tales/main/assets/masthead.webp"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*",
     "typebox": "*"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "vitest": "^4.1.10"
+  }
 }
