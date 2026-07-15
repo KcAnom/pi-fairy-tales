@@ -8,7 +8,7 @@ Subagent orchestration · isolated-worktree planning · guard-rail hooks · pers
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-gold.svg)](LICENSE)
 [![Built for pi](https://img.shields.io/badge/built%20for-pi%20coding%20agent-8a5cf6.svg)](https://github.com/earendil-works/pi-mono)
-[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.14.0--dev-blue.svg)](CHANGELOG.md)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 </div>

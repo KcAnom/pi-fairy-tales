@@ -154,7 +154,9 @@ export default function (pi: ExtensionAPI) {
     }),
     renderResult(result, opts, theme) {
       const d = (result.details ?? {}) as Partial<RunSummary> & { structured?: { status?: string } };
-      const glyph = ROLE_GLYPH[d.role ?? ""] ?? "✧";
+      // Storybook glyphs only in ftales; plain pi gets a neutral marker (mirrors
+      // the FAE ? "✧" : "◐" gate already used in the live widget).
+      const glyph = process.env.FTALES === "1" ? (ROLE_GLYPH[d.role ?? ""] ?? "✧") : "◆";
       const status = d.structured?.status ? ` · ${d.structured.status}` : "";
       const header =
         theme.fg("accent", `${glyph} ${d.name ?? "agent"}`) +

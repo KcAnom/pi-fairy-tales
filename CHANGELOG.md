@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.14.0-dev — 2026-07-15
+
+A refinement pass: correctness fixes for the engine, security hardening, TUI state-leak fixes, branding separation, new capabilities, and a test suite.
+
+**Correctness (engine)**
+- `agent_control continue` now enforces turn/cost caps and reports spend (previously ran uncapped and uncosted).
+- Orchestrated-mode escalation now fires on turn/cost cap hits (`cappedReason`), not just provider errors. User-initiated aborts don't escalate.
+- Cost estimation includes cache tokens (cacheRead ~10% of input, cacheWrite ~125%). All 6 call sites updated.
+
+**Correctness (security)**
+- SSRF `fetch` defends against DNS rebinding (pinned undici connect.lookup; dynamic import with fallback).
+- `normalizeCommand` catches `$IFS` evasion. Shipped guard rules broadened (pipe-to-shell, variable-indirection, command-substitution).
+- `ipIsPrivate` conservatively blocks malformed input.
+
+**Correctness (TUI hardening)**
+- Terminal restored on SIGINT/SIGTERM/SIGHUP (mouse tracking no longer stuck after a signal kill).
+- OSC 52 capped at 100kB (oversized payloads no longer wedge the terminal).
+- clipwatch listener removed on shutdown; intervals/timers unref'd.
+- `__fairyTalesDawn` global cleared on shutdown.
+
+**Correctness (branding separation)**
+- `renderResult` glyphs, `/grimoire` title, `/ultraplan` plan-view title, and the bookOverlay separator are gated on FTALES — plain pi gets no fairy-tale branding (hard guarantee).
+- Theme handback is idempotent: `previousTheme` deleted after restore so it can't re-fire or revert a manually-chosen theme.
+
+**New capabilities**
+- Session spend circuit breaker (`agents.maxCostPerSessionUsd`): blocks new spawns when exceeded; main conversation continues.
+- `/ultraplan` diff-preview gate: review the worktree diff before pushing a PR / writing a patch.
+- Subagent result memoization (`agents.cacheTtlMs`, default 10min): identical delegations reuse the cached result.
+- Targeted post-edit tests: `.pi/test-map.json` (glob→command) + `FT_CHANGED_FILES` env for the test command.
+- Memory ranking: TF-IDF + recency (distinctive terms and recent memories score higher).
+- Compaction quality guard: a degraded summary is annotated so the agent knows.
+
+**Infrastructure**
+- Shared cost aggregator (`src/cost.ts`): footer, status line, and ledger use one fallback-math source — no drift.
+- Vitest test suite: 136 tests across 8 files. `npm test`.
+
 ## 0.13.0 — 2026-07-14
 
 Clarity + interchangeability: always know what you're running, swap it in one move.
