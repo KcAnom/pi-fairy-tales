@@ -17,7 +17,7 @@ import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import { loadFairyTalesConfig, type FairyTalesConfig } from "../src/config.ts";
-import { checkBashCommand, checkPath, isMutatingBash, extractBashWriteTargets } from "../src/rules.ts";
+import { checkBashCommand, checkPath, isMutatingBash, extractBashWriteTargets, selectTestCommands } from "../src/rules.ts";
 import { PLAN_CHANGED, type PlanChangedPayload } from "../src/bus.ts";
 import { clipTail } from "../src/text.ts";
 import { debug } from "../src/util.ts";
@@ -120,18 +120,32 @@ export default function (pi: ExtensionAPI) {
     cfg ??= loadFairyTalesConfig(ctx.cwd);
     if (!cfg.hooks.postEdit.enabled || touchedFiles.size === 0 || testRunning) return;
 
-    const cmdFile = join(ctx.cwd, cfg.hooks.postEdit.testCommandFile);
-    if (!existsSync(cmdFile)) {
-      touchedFiles.clear();
-      return;
+    const files = [...touchedFiles].map((f) => {
+      const rel = f.startsWith(ctx.cwd) ? f.slice(ctx.cwd.length).replace(/^\//, "") : f;
+      return rel;
+    });
+
+    // Targeted tests: if .pi/test-map.json exists, run only matching commands.
+    // Otherwise fall back to the blanket test-command (with FT_CHANGED_FILES set).
+    const mapFile = join(ctx.cwd, cfg.hooks.postEdit.testMapFile ?? ".pi/test-map.json");
+    let commands: string[] = [];
+    if (existsSync(mapFile)) {
+      try {
+        const map = JSON.parse(readFileSync(mapFile, "utf-8")) as Record<string, string>;
+        commands = selectTestCommands(Object.entries(map).map(([glob, command]) => ({ glob, command })), files);
+      } catch (err) {
+        debug("hooks", "failed to parse test-map.json", err);
+      }
     }
-    const testCmd = readFileSync(cmdFile, "utf-8").trim();
-    if (!testCmd) {
-      touchedFiles.clear();
-      return;
+    if (commands.length === 0) {
+      const cmdFile = join(ctx.cwd, cfg.hooks.postEdit.testCommandFile);
+      if (!existsSync(cmdFile)) { touchedFiles.clear(); return; }
+      const testCmd = readFileSync(cmdFile, "utf-8").trim();
+      if (!testCmd) { touchedFiles.clear(); return; }
+      commands = [testCmd];
     }
 
-    void runTests(ctx, testCmd);
+    void runTests(ctx, commands, files);
   });
 
   // Run detached so a slow test suite never stalls the agent loop; failures are
@@ -139,15 +153,20 @@ export default function (pi: ExtensionAPI) {
   // and we test the union afterward so nothing slips through.
   async function runTests(
     ctx: { hasUI: boolean; cwd: string; ui: { setStatus(k: string, t?: string): void; notify(m: string, l?: string): void } },
-    testCmd: string,
+    commands: string[],
+    files: string[],
   ): Promise<void> {
-    const files = [...touchedFiles];
     touchedFiles = new Set();
     testRunning = true;
     rerunPending = false;
+    const testCmd = commands.join(" && ");
     if (ctx.hasUI) ctx.ui.setStatus("fairy-tales-tests", "⏳ tests");
     try {
+      // Expose changed files so the test command can run a targeted subset.
+      const prevFiles = process.env.FT_CHANGED_FILES;
+      process.env.FT_CHANGED_FILES = files.join(" ");
       const result = await pi.exec("sh", ["-c", testCmd], { timeout: cfg!.hooks.postEdit.timeoutMs ?? 120000 });
+      process.env.FT_CHANGED_FILES = prevFiles;
       if (result.code !== 0) {
         const output = clipTail(`${result.stdout}\n${result.stderr}`.trim(), 16384, 400);
         pi.sendMessage(
@@ -169,8 +188,10 @@ export default function (pi: ExtensionAPI) {
     } finally {
       testRunning = false;
       if (ctx.hasUI) ctx.ui.setStatus("fairy-tales-tests", undefined);
-      // Edits arrived while tests ran — re-run against the union.
-      if (rerunPending && touchedFiles.size) await runTests(ctx, testCmd);
+      if (rerunPending && touchedFiles.size) {
+        const union = [...new Set([...files, ...[...touchedFiles]])];
+        await runTests(ctx, commands, union);
+      }
     }
   }
 }

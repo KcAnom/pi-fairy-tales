@@ -125,9 +125,11 @@ export class MemoryStore {
   }
 
   /**
-   * Return an index for injection, ranked by relevance to the opening prompt.
-   * Topic pointers are always kept; plain bullets are scored by shared keywords
-   * and capped so the context window isn't flooded on long-lived memories.
+   * Return an index for injection, ranked by a combined TF-IDF + recency score.
+   * Topic pointers are always kept; plain bullets are scored by term-frequency ×
+   * inverse-document-frequency (distinctive prompt terms score higher than common
+   * ones) plus a recency decay (recent memories score higher), and capped so the
+   * context window isn't flooded on long-lived memories.
    */
   relevantIndex(prompt: string | undefined, maxBullets = 24): string | undefined {
     const idx = this.readIndex();
@@ -140,13 +142,33 @@ export class MemoryStore {
     if (!prompt || bullets.length <= maxBullets) {
       return idx; // nothing to rank against, or already small enough
     }
-    const promptTokens = tokens(prompt);
+    const promptTokens = [...tokens(prompt)];
+    // Document frequency: how many bullets contain each term.
+    const bulletTokenSets = bullets.map((b) => tokens(b));
+    const df = new Map<string, number>();
+    for (const ts of bulletTokenSets) {
+      for (const t of ts) df.set(t, (df.get(t) ?? 0) + 1);
+    }
+    const N = bullets.length;
+    const now = Date.now();
     const scored = bullets
-      .map((b) => {
-        const bt = tokens(b);
-        let score = 0;
-        for (const t of bt) if (promptTokens.has(t)) score++;
-        return { b, score };
+      .map((b, i) => {
+        const bt = bulletTokenSets[i];
+        let tfidf = 0;
+        for (const t of promptTokens) {
+          if (bt.has(t)) {
+            const d = df.get(t) ?? 1;
+            tfidf += Math.log(N / d);
+          }
+        }
+        // Recency: parse _(YYYY-MM-DD)_ → 1/(1+days/30).
+        let recency = 0.5;
+        const dateMatch = b.match(/_?\((\d{4}-\d{2}-\d{2})\)_?/);
+        if (dateMatch) {
+          const days = (now - new Date(dateMatch[1]).getTime()) / 86_400_000;
+          recency = 1 / (1 + days / 30);
+        }
+        return { b, score: tfidf * 0.6 + recency * 0.4 };
       })
       .sort((a, z) => z.score - a.score);
     const top = scored.slice(0, maxBullets).map((s) => s.b);

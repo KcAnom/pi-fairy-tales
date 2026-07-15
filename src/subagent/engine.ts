@@ -130,12 +130,19 @@ export class AgentRunner {
   private running = 0;
   private waiters: Array<() => void> = [];
   private liveOrder: string[] = []; // LRU of kept-alive session run ids
+  /** Result cache: hash(role+task+context) → { result, expiry }. Saves redundant
+   *  re-spawns when the model re-issues a similar delegation within the TTL. */
+  private resultCache = new Map<string, { result: RunResult; expiry: number }>();
 
   constructor(
     private cfg: () => FairyTalesConfig,
     private onStatus: (running: RunSummary[]) => void,
     private onCost: (usd: number) => void,
   ) {}
+
+  private cacheKey(role: string, task: string, context?: string): string {
+    return createHash("sha256").update(`${role}\0${task}\0${context ?? ""}`).digest("hex");
+  }
 
   setConfig(cfg: () => FairyTalesConfig): void {
     this.cfg = cfg;
@@ -214,6 +221,47 @@ export class AgentRunner {
     if (!role) {
       throw new Error(`Unknown agent role "${opts.role}". Available: ${Object.keys(cfg.agents.roles).join(", ")}`);
     }
+
+    // Result cache: identical (role, task, context) within TTL reuses the result.
+    // Excludes background, escalation, forceSessionModel (ultraplan), noCache.
+    const ttlMs = cfg.agents.cacheTtlMs ?? 600_000;
+    if (ttlMs > 0 && !opts.noCache && !opts.background && !opts.tierOverride && !opts.forceSessionModel) {
+      const key = this.cacheKey(opts.role, opts.task, opts.context);
+      const now = Date.now();
+      const cached = this.resultCache.get(key);
+      if (cached && now <= cached.expiry) {
+        const id = `a${this.nextId++}`;
+        const cachedResult: RunResult = {
+          ...cached.result,
+          text: `⚠ (cached result from a recent identical run)\n${cached.result.text}`,
+          warnings: ["(cached)", ...cached.result.warnings],
+        };
+        const summary: RunSummary = { ...cached.result.summary, id, state: "done", lastActivity: "cached" };
+        const placeholder: Run = {
+          summary,
+          session: { abort: async () => {}, dispose: () => {}, prompt: async () => {}, subscribe: () => () => {}, messages: [] },
+          promise: undefined as never,
+          result: cachedResult,
+        };
+        this.runs.set(id, placeholder);
+        placeholder.promise = Promise.resolve(cachedResult);
+        this.emitStatus();
+        return { id, promise: placeholder.promise };
+      }
+      const spawned = this.spawnUncached(opts, cfg, role);
+      const orig = spawned.promise;
+      spawned.promise = orig.then((result) => {
+        if (result.summary.state === "done") {
+          this.resultCache.set(key, { result, expiry: Date.now() + ttlMs });
+        }
+        return result;
+      });
+      return spawned;
+    }
+    return this.spawnUncached(opts, cfg, role);
+  }
+
+  private spawnUncached(opts: SpawnOptions, cfg: FairyTalesConfig, role: RoleConfig): { id: string; promise: Promise<RunResult> } {
     // Overflow queues rather than fails, but a huge backlog still errors.
     const queued = this.list().filter((r) => r.state === "queued").length;
     if (queued >= cfg.agents.maxConcurrent * 4) {

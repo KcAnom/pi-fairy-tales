@@ -26,8 +26,9 @@ import {
 } from "../src/config.ts";
 import { bookOverlay } from "../src/overlay.ts";
 import { AgentRunner, shouldEscalate, type RunResult } from "../src/subagent/engine.ts";
-import { AGENTS_STATUS, COST_ADD, type RunSummary } from "../src/bus.ts";
+import { AGENTS_STATUS, COST_ADD, type CostAddPayload, type RunSummary } from "../src/bus.ts";
 import { fmtDuration, fmtUsd, fmtTokens, shortModelId } from "../src/text.ts";
+import { createSpendTracker } from "../src/spend.ts";
 
 // Storybook glyphs for roles (matches the Fae Council names when branded).
 const ROLE_GLYPH: Record<string, string> = {
@@ -43,6 +44,11 @@ export default function (pi: ExtensionAPI) {
 
   let cfg: FairyTalesConfig | undefined;
   let uiRef: { hasUI: boolean; ui: { setWidget(k: string, l?: string[], o?: { placement?: string }): void } } | undefined;
+
+  // Session spend tracker — feeds on the same events the footer/status/ledger
+  // do, so the circuit breaker fires at exactly the total the user sees.
+  const spend = createSpendTracker();
+  pi.events.on(COST_ADD, (d: CostAddPayload) => spend.addCostFromEvent(d));
 
   const runner = new AgentRunner(
     () => cfg ?? loadFairyTalesConfig(process.cwd()),
@@ -85,6 +91,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     cfg = loadFairyTalesConfig(ctx.cwd);
     uiRef = ctx;
+    spend.reset();
     // Orchestrated mode: the session model IS the conductor — align it.
     if (cfg.agents.modelMode === "orchestrated") {
       const cond = cfg.tiers?.conductor?.model;
@@ -112,6 +119,12 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async () => {
     await runner.abortAll();
+  });
+
+  // Track main-session spend so the circuit breaker sees the full picture.
+  pi.on("message_end", async (event) => {
+    const msg = event.message as { role?: string; usage?: Record<string, unknown> };
+    if (msg?.role === "assistant" && msg.usage) spend.addUsage(msg.usage as never);
   });
 
   // Role enum is derived from config so custom roles are reachable (#14).
@@ -155,6 +168,25 @@ export default function (pi: ExtensionAPI) {
     },
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       cfg = loadFairyTalesConfig(ctx.cwd);
+
+      // Session spend circuit breaker: block new subagent spawns when the
+      // session total exceeds the configured ceiling. The main conversation
+      // continues — only delegation is blocked.
+      const sessionCap = cfg.agents.maxCostPerSessionUsd;
+      if (sessionCap && spend.exceeded(sessionCap)) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `⚠ Session spend limit reached: ${fmtUsd(spend.getTotal())} of ${fmtUsd(sessionCap)}. ` +
+                `New subagent spawns are blocked so the total can't climb further. ` +
+                `Complete the work directly in this conversation, or raise agents.maxCostPerSessionUsd in ~/.pi/agent/fairy-tales.json.`,
+            },
+          ],
+          details: { sessionSpendBlocked: true, total: spend.getTotal(), cap: sessionCap },
+        };
+      }
 
       // Orchestrated mode: a failed cheap-tier run retries ONCE on the
       // conductor tier, with the failed attempt's report attached.

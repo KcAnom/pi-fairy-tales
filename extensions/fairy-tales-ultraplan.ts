@@ -18,11 +18,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { loadFairyTalesConfig, expandHome, isNested, type FairyTalesConfig } from "../src/config.ts";
 import { AgentRunner } from "../src/subagent/engine.ts";
-import { COST_ADD, type RunSummary } from "../src/bus.ts";
+import { COST_ADD, type CostAddPayload, type RunSummary } from "../src/bus.ts";
 import { slugify } from "../src/text.ts";
+import { createSpendTracker } from "../src/spend.ts";
 import { bookOverlay } from "../src/overlay.ts";
 import { debug } from "../src/util.ts";
-import { createWorktree, commitAll, formatPatch, detectRemote, openPr, repoRootOf, type Worktree } from "../src/ultraplan/worktree.ts";
+import { createWorktree, commitAll, formatPatch, diffWorktree, detectRemote, openPr, repoRootOf, type Worktree } from "../src/ultraplan/worktree.ts";
 
 interface PlanDoc {
   title: string;
@@ -37,6 +38,9 @@ export default function (pi: ExtensionAPI) {
   let cfg: FairyTalesConfig | undefined;
   let sessionModel: unknown;
   let active = false;
+
+  const spend = createSpendTracker();
+  pi.events.on(COST_ADD, (d: CostAddPayload) => spend.addCostFromEvent(d));
 
   const runner = new AgentRunner(
     () => cfg ?? loadFairyTalesConfig(process.cwd()),
@@ -68,11 +72,17 @@ export default function (pi: ExtensionAPI) {
     cfg = loadFairyTalesConfig(ctx.cwd);
     uiRef = ctx;
     sessionModel = (ctx as { model?: unknown }).model;
+    spend.reset();
   });
 
   pi.on("model_select", async (event) => {
     const m = (event as { model?: unknown }).model;
     if (m) sessionModel = m;
+  });
+
+  pi.on("message_end", async (event) => {
+    const msg = event.message as { role?: string; usage?: Record<string, unknown> };
+    if (msg?.role === "assistant" && msg.usage) spend.addUsage(msg.usage as never);
   });
 
   pi.on("session_shutdown", async () => {
@@ -92,6 +102,13 @@ export default function (pi: ExtensionAPI) {
       const model = sessionModel ?? (ctx as { model?: unknown }).model;
       const registry = ctx.modelRegistry;
       if (!model) return ctx.ui.notify("No session model yet — send a message first, then run /ultraplan.", "info");
+      const sessionCap = cfg.agents.maxCostPerSessionUsd;
+      if (sessionCap && spend.exceeded(sessionCap)) {
+        return ctx.ui.notify(
+          `⚠ Session spend limit reached: $${spend.getTotal().toFixed(2)} of $${sessionCap.toFixed(2)} — /ultraplan blocked. Raise agents.maxCostPerSessionUsd to proceed.`,
+          "warning",
+        );
+      }
 
       active = true;
       setStage(`◆ ultraplan: planning (${up.planners > 1 ? `${up.planners} planners` : "1 planner"})…`);
@@ -273,24 +290,10 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const remote = detectRemote(repoRoot);
-      let outcome: string;
-      if (remote.hasRemote && remote.hasGh) {
-        try {
-          const url = openPr(repoRoot, wt.dir, wt.branch, `ultraplan: ${plan.title}`, plan.markdown);
-          outcome = `PR opened → ${url}`;
-        } catch (err) {
-          debug("ultraplan", "PR failed, falling back to patch", err);
-          const patch = join(repoRoot, `${slugify(plan.title)}.patch`);
-          formatPatch(wt.dir, baseSha, patch);
-          outcome = `PR push failed; patch written → ${patch}`;
-        }
-      } else {
-        const patch = join(repoRoot, `${slugify(plan.title)}.patch`);
-        formatPatch(wt.dir, baseSha, patch);
-        outcome = `patch written → ${patch} (apply with \`git apply\`)`;
-      }
-      ctx.ui.notify(`ultraplan: execution complete — ${outcome}`, "info");
+      // Diff-preview gate: a right-looking plan can produce a wrong-looking
+      // diff. Show the changes and let the user decide how to land them before
+      // anything is pushed.
+      await reviewAndLand(ctx, plan, repoRoot, wt, baseSha);
     } finally {
       wt?.cleanup();
       setStage(undefined);
@@ -303,5 +306,70 @@ export default function (pi: ExtensionAPI) {
     } catch {
       return "HEAD";
     }
+  }
+
+  async function reviewAndLand(
+    ctx: { hasUI: boolean; cwd: string; ui: any },
+    plan: PlanDoc,
+    repoRoot: string,
+    wt: Worktree,
+    baseSha: string,
+  ): Promise<void> {
+    const PUSH_PR = "Push PR";
+    const WRITE_PATCH = "Write patch";
+    const VIEW_DIFF = "View diff";
+    const DISCARD = "Discard (drop the branch)";
+
+    let diff = "";
+    try {
+      diff = diffWorktree(wt.dir, baseSha);
+    } catch (err) {
+      debug("ultraplan", "failed to compute diff for review", err);
+    }
+
+    const land = (method: "pr" | "patch"): string => {
+      const remote = detectRemote(repoRoot);
+      if (method === "pr" && remote.hasRemote && remote.hasGh) {
+        try {
+          const url = openPr(repoRoot, wt.dir, wt.branch, `ultraplan: ${plan.title}`, plan.markdown);
+          return `PR opened → ${url}`;
+        } catch (err) {
+          debug("ultraplan", "PR failed, falling back to patch", err);
+        }
+      }
+      const patch = join(repoRoot, `${slugify(plan.title)}.patch`);
+      formatPatch(wt.dir, baseSha, patch);
+      return `patch written → ${patch} (apply with \`git apply\`)`;
+    };
+
+    for (;;) {
+      const choice = await ctx.ui.select(`ultraplan built "${plan.title}" — review the ${diff.length}-byte diff`, [
+        PUSH_PR, WRITE_PATCH, VIEW_DIFF, DISCARD,
+      ]);
+      if (choice === VIEW_DIFF) {
+        await showDiff(ctx, plan.title, diff);
+        continue;
+      }
+      if (choice === undefined || choice === DISCARD) {
+        ctx.ui.notify("ultraplan: changes discarded — the worktree branch will be cleaned up.", "info");
+        return;
+      }
+      ctx.ui.notify(`ultraplan: execution complete — ${land(choice === PUSH_PR ? "pr" : "patch")}`, "info");
+      return;
+    }
+  }
+
+  async function showDiff(ctx: { ui: any }, title: string, diff: string): Promise<void> {
+    await ctx.ui.custom(
+      (tui: unknown, theme: { fg(c: string, s: string): string }, _kb: unknown, done: (v: undefined) => void) => {
+        const contentLines = (diff || "(empty diff)").split("\n").map((l) => {
+          if (l.startsWith("+") && !l.startsWith("+++")) return theme.fg("success", l);
+          if (l.startsWith("-") && !l.startsWith("---")) return theme.fg("error", l);
+          if (l.startsWith("@@")) return theme.fg("muted", l);
+          return theme.fg("text", l);
+        });
+        return bookOverlay({ title: process.env.FTALES === "1" ? `❦ ${title} — diff ❦` : `${title} — diff`, contentLines, tui, theme, done });
+      },
+    );
   }
 }

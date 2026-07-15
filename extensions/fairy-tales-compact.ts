@@ -18,6 +18,7 @@ import { isNested, loadFairyTalesConfig, resolveCheapestModel, resolveTierModel 
 import { COST_ADD } from "../src/bus.ts";
 import { clipTail, fmtTokens, fmtUsd } from "../src/text.ts";
 import { emptyAgentDir, debug, estimateCostUsd } from "../src/util.ts";
+import { summaryQualityScore } from "../src/compact.ts";
 
 const SUMMARIZER_PROMPT = `You are a conversation summarizer for a coding agent. You receive a serialized conversation and produce a handoff summary so the agent can continue seamlessly with the older messages removed.
 
@@ -128,9 +129,19 @@ export default function (pi: ExtensionAPI) {
           .join("\n")
           .trim();
         if (!summary) return undefined;
+        // Quality guard: a cheap-tier summarizer can produce a degraded summary
+        // (too long, or missing key file paths). If it does, annotate it so the
+        // agent knows the context may be incomplete.
+        const quality = summaryQualityScore(summary, conversation);
+        if (!quality.pass) {
+          debug("compact", `summary quality check failed: ${quality.reason}`);
+        }
+        const finalSummary = quality.pass
+          ? summary
+          : `${summary}\n\n_[Note: compaction summary may be incomplete — ${quality.reason}. Refer to recent messages for the latest state.]_`;
         return {
           compaction: {
-            summary,
+            summary: finalSummary,
             firstKeptEntryId: preparation.firstKeptEntryId,
             tokensBefore: preparation.tokensBefore,
             details: { fairyTales: true },
