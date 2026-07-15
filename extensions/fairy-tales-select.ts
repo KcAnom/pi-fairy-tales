@@ -278,9 +278,31 @@ export default function (pi: ExtensionAPI) {
     }
   };
   // Backstop: never leave the user's terminal in mouse-reporting mode.
-  process.on("exit", () => {
-    if (enabled) process.stdout.write(DISABLE);
-  });
+  // `process.on("exit")` does NOT fire on SIGINT/SIGTERM/SIGHUP, so a signal
+  // exit would leave the terminal stuck in SGR mouse-tracking mode (every click
+  // pasting escape garbage). Register the exit + signal handlers ONCE per
+  // process — without the guard, a hot module reload would accumulate duplicate
+  // listeners each time this extension re-evaluates.
+  if (!(globalThis as Record<string, unknown>).__ftSelectCleanupRegistered) {
+    (globalThis as Record<string, unknown>).__ftSelectCleanupRegistered = true;
+    const cleanup = () => {
+      try {
+        process.stdout.write(DISABLE);
+      } catch {
+        // stdout may be torn down during signal shutdown
+      }
+    };
+    process.on("exit", cleanup);
+    // Each signal: restore the terminal, then re-raise so the process's default
+    // exit behavior proceeds. `process.once` has already auto-removed by the
+    // time we re-raise, so there's no re-entrant loop.
+    for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+      process.once(sig, () => {
+        cleanup();
+        process.kill(process.pid, sig);
+      });
+    }
+  }
 
   const finish = async () => {
     if (!anchor || !head || !tui) return;

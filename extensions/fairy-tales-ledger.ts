@@ -10,7 +10,7 @@ import { isNested } from "../src/config.ts";
 import { bookOverlay } from "../src/overlay.ts";
 import { AGENTS_STATUS, COST_ADD, type AgentsStatusPayload, type CostAddPayload, type RunSummary } from "../src/bus.ts";
 import { fmtTokens, fmtUsd } from "../src/text.ts";
-import { estimateCostUsd } from "../src/util.ts";
+import { createCostAggregator } from "../src/cost.ts";
 
 interface Bucket {
   input: number;
@@ -28,6 +28,10 @@ export default function (pi: ExtensionAPI) {
   let main = emptyBucket();
   let mainCacheRead = 0;
   let mainCacheWrite = 0;
+  // Shared cost math for the main bucket — same `reported > 0 ? reported :
+  // estimateCostUsd(...)` fallback as the footer/status line, so /ledger's
+  // main total never drifts from the gold counter.
+  let mainCost = createCostAggregator();
   // Subagent runs by id — live snapshots via AGENTS_STATUS, plus finished runs
   // recovered from agent tool results in the branch.
   const runs = new Map<string, RunSummary>();
@@ -44,9 +48,9 @@ export default function (pi: ExtensionAPI) {
     main.output += u.output ?? 0;
     mainCacheRead += u.cacheRead ?? 0;
     mainCacheWrite += u.cacheWrite ?? 0;
-    main.usd +=
-      (u.cost?.total ?? 0) ||
-      estimateCostUsd(u.input ?? 0, u.output ?? 0, u.cacheRead ?? 0, u.cacheWrite ?? 0);
+    const before = mainCost.getUsd();
+    mainCost.addUsage(u as never);
+    main.usd += mainCost.getUsd() - before;
   };
 
   const recordRunDetails = (details: unknown) => {
@@ -60,6 +64,7 @@ export default function (pi: ExtensionAPI) {
     main = emptyBucket();
     mainCacheRead = 0;
     mainCacheWrite = 0;
+    mainCost = createCostAggregator();
     runs.clear();
     extras.clear();
     for (const entry of ctx.sessionManager.getBranch()) {

@@ -8,7 +8,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isNested, lineupLabel, loadFairyTalesConfig, loadDiagnostics, resolveTierModel } from "../src/config.ts";
 import { AGENTS_STATUS, COST_ADD, type AgentsStatusPayload, type CostAddPayload } from "../src/bus.ts";
 import { fmtUsd, shortModelId } from "../src/text.ts";
-import { estimateCostUsd } from "../src/util.ts";
+import { createCostAggregator } from "../src/cost.ts";
 
 // The enchanted footer (ftales only) owns the vitals; the plain status segment
 // stands down so the two never compute cost/agents independently and disagree.
@@ -19,7 +19,7 @@ export default function (pi: ExtensionAPI) {
 
   let modelName = "";
   let contextPct: number | undefined;
-  let costUsd = 0;
+  const cost = createCostAggregator();
   let runningAgents = 0;
   let render: (() => void) | undefined;
 
@@ -30,12 +30,13 @@ export default function (pi: ExtensionAPI) {
     if (lineup) parts.push(lineup);
     else if (modelName) parts.push(modelName);
     if (contextPct !== undefined) parts.push(`ctx ${contextPct}%`);
-    parts.push(fmtUsd(costUsd));
+    parts.push(fmtUsd(cost.getUsd()));
     if (runningAgents > 0) parts.push(`⚡${runningAgents} agent${runningAgents > 1 ? "s" : ""}`);
     ctx.ui.setStatus("fairy-tales", parts.join(" · "));
   };
 
   pi.on("session_start", async (_event, ctx) => {
+    cost.reset();
     modelName = (ctx.model as { id?: string } | undefined)?.id ?? "";
     render = () => update(ctx);
     update(ctx);
@@ -78,11 +79,7 @@ export default function (pi: ExtensionAPI) {
       usage?: { cost?: { total?: number }; input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
     };
     if (msg.role === "assistant" && msg.usage) {
-      const reported = msg.usage.cost?.total ?? 0;
-      costUsd +=
-        reported > 0
-          ? reported
-          : estimateCostUsd(msg.usage.input ?? 0, msg.usage.output ?? 0, msg.usage.cacheRead ?? 0, msg.usage.cacheWrite ?? 0);
+      cost.addUsage(msg.usage as never);
       update(ctx);
     }
   });
@@ -96,7 +93,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.events.on(COST_ADD, (data: CostAddPayload) => {
-    costUsd += data?.usd ?? 0;
+    cost.addCost(data?.usd ?? 0);
     render?.();
   });
 

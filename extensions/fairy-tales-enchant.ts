@@ -23,6 +23,7 @@ import { bookOverlay } from "../src/overlay.ts";
 import { AGENTS_STATUS, COST_ADD, type AgentsStatusPayload, type CostAddPayload } from "../src/bus.ts";
 import { clipTail, fmtUsd, shortModelId } from "../src/text.ts";
 import { emptyAgentDir, estimateCostUsd } from "../src/util.ts";
+import { createCostAggregator } from "../src/cost.ts";
 
 const NARRATOR_PROMPT = `You are the Narrator of a storybook about a software developer's work. You receive a serialized coding-agent conversation and retell it as a short fairy-tale chapter.
 
@@ -39,7 +40,7 @@ export default function (pi: ExtensionAPI) {
   // ---- shared live data for the footer ----
   let modelName = "";
   let inkPct: number | undefined;
-  let goldUsd = 0;
+  const gold = createCostAggregator();
   let sprites = 0;
   let requestRender: (() => void) | undefined;
   let pendingRender = false;
@@ -52,7 +53,7 @@ export default function (pi: ExtensionAPI) {
   };
 
   pi.events.on(COST_ADD, (d: CostAddPayload) => {
-    goldUsd += d?.usd ?? 0;
+    gold.addCost(d?.usd ?? 0);
     scheduleRender();
   });
   pi.events.on(AGENTS_STATUS, (d: AgentsStatusPayload) => {
@@ -71,11 +72,7 @@ export default function (pi: ExtensionAPI) {
       usage?: { cost?: { total?: number }; input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
     };
     if (msg.role === "assistant" && msg.usage) {
-      const reported = msg.usage.cost?.total ?? 0;
-      goldUsd +=
-        reported > 0
-          ? reported
-          : estimateCostUsd(msg.usage.input ?? 0, msg.usage.output ?? 0, msg.usage.cacheRead ?? 0, msg.usage.cacheWrite ?? 0);
+      gold.addUsage(msg.usage as never);
       scheduleRender();
     }
   });
@@ -139,7 +136,7 @@ export default function (pi: ExtensionAPI) {
               if (inkPct !== undefined) {
                 parts.push(theme.fg(inkPct < 20 ? "warning" : "muted", `✒ ink ${inkPct}%`));
               }
-              parts.push(theme.fg("muted", `🜚 ${fmtUsd(goldUsd)} gold`));
+              parts.push(theme.fg("muted", `🜚 ${fmtUsd(gold.getUsd())} gold`));
               if (sprites > 0) parts.push(theme.fg("accent", `✧ ${sprites} sprite${sprites > 1 ? "s" : ""} at work`));
               for (const [key, text] of footerData.getExtensionStatuses()) {
                 if (key === "fairy-tales") continue; // our footer already shows these vitals
@@ -172,6 +169,7 @@ export default function (pi: ExtensionAPI) {
           done: (v: undefined) => void,
         ) => {
           const timer = setTimeout(() => closeOverlay(tui, done), 1800);
+          timer.unref?.(); // the title screen auto-dismisses; don't pin the event loop
           return {
             render(width: number): string[] {
               return ["", ...renderMasthead(theme, width), ""];

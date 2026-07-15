@@ -7,13 +7,14 @@
  */
 export function closeOverlay(tui: unknown, done: (v: undefined) => void): void {
   done(undefined);
-  setTimeout(() => {
+  const timer = setTimeout(() => {
     try {
       (tui as { requestRender(force?: boolean): void }).requestRender(true);
     } catch {
       // cosmetic only
     }
   }, 15);
+  timer.unref?.(); // cosmetic repaint must not keep the process alive
 }
 
 export interface ThemeLike {

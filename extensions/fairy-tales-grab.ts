@@ -12,6 +12,10 @@ import { isNested } from "../src/config.ts";
 import { CLIP_MARK } from "../src/bus.ts";
 import { flashStatus } from "../src/util.ts";
 
+// OSC 52 payloads past this base64 length can overrun a terminal's parser
+// budget (~100kB is the common cap) and wedge it; refuse rather than risk it.
+const MAX_OSC52 = 100_000;
+
 function extractText(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
@@ -60,6 +64,7 @@ export async function copyToClipboard(text: string): Promise<string> {
   // OSC 52: ask the terminal itself to set the clipboard. Many terminals cap the
   // payload (~100kB base64) — large copies may truncate, but it works over SSH.
   const b64 = Buffer.from(text, "utf-8").toString("base64");
+  if (b64.length > MAX_OSC52) return "too-large"; // an oversized OSC 52 can wedge the terminal parser
   process.stdout.write(`\x1b]52;c;${b64}\x07`);
   return "osc52";
 }

@@ -11,7 +11,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
-import { isNested, loadFairyTalesConfig, saveUserConfig } from "../src/config.ts";
+import { isNested, loadFairyTalesConfig, saveUserConfig, updateUserConfig } from "../src/config.ts";
 import { renderMasthead } from "../src/banner.ts";
 
 const SPARKLES = ["·", "✦", "✧", "⋆", "✧", "✦"];
@@ -41,14 +41,21 @@ export default function (pi: ExtensionAPI) {
 
   if (process.env.FTALES !== "1") {
     // Plain `pi`: setTheme persists to settings.json, so if the last session
-    // was ftales-branded, hand the theme back to what it was before.
+    // was ftales-branded, hand the theme back to what it was before. This is a
+    // one-shot: after restoring we DELETE ui.previousTheme so it can't re-fire
+    // on every subsequent plain-pi start — and a user who manually picks a
+    // non-fairy theme in plain pi won't get it reverted.
     pi.on("session_start", async (_event, ctx) => {
       if (!ctx.hasUI) return;
       try {
-        const cfg = loadFairyTalesConfig(ctx.cwd) as { ui?: { previousTheme?: string } };
-        const previous = cfg.ui?.previousTheme;
+        const previous = loadFairyTalesConfig(ctx.cwd).ui?.previousTheme;
         if (previous && !isFairyTheme(previous) && isFairyTheme(settingsTheme())) {
           ctx.ui.setTheme(previous);
+          await updateUserConfig((c) => {
+            const ui = (c.ui ?? {}) as { previousTheme?: string };
+            delete ui.previousTheme;
+            return { ...c, ui };
+          });
         }
       } catch {
         // never block startup over cosmetics

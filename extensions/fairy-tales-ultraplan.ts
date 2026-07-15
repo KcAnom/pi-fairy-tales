@@ -201,7 +201,8 @@ export default function (pi: ExtensionAPI) {
     await ctx.ui.custom(
       (tui: unknown, theme: { fg(c: string, s: string): string; bold(s: string): string }, _kb: unknown, done: (v: undefined) => void) => {
         const contentLines = plan.markdown.split("\n").map((l) => theme.fg("text", l));
-        return bookOverlay({ title: `❦ ${plan.title} ❦`, contentLines, tui, theme, done });
+        const title = process.env.FTALES === "1" ? `❦ ${plan.title} ❦` : plan.title;
+        return bookOverlay({ title, contentLines, tui, theme, done, branded: process.env.FTALES === "1" });
       },
     );
   }

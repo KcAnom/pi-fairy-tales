@@ -15,8 +15,14 @@ export function bookOverlay(opts: {
   theme: ThemeLike;
   done: (v: undefined) => void;
   hint?: string;
+  /** Show the branded sparkle separators (· ✦). Plain pi gets plain "·". Defaults
+   *  to off unless FTALES=1 is active, matching the plain-pi/ftales contract. */
+  branded?: boolean;
 }) {
   const { title, contentLines, tui, theme, done } = opts;
+  // Default to the branded separators when running under ftales; callers can opt
+  // out (plain pi) by passing branded: false. Plain pi → plain "·" separators.
+  const branded = (opts.branded ?? process.env.FTALES === "1") && process.env.FTALES === "1";
   let offset = 0;
 
   // Rows for content between the frame. If the terminal height is unknown
@@ -38,7 +44,8 @@ export function bookOverlay(opts: {
   return {
     render(width: number): string[] {
       const inner = Math.max(20, width - 4);
-      const rule = theme.fg("dim", "· ✦ ".repeat(Math.max(1, Math.floor(inner / 4))));
+      const motif = branded ? "· ✦ " : "· ";
+      const rule = theme.fg("dim", motif.repeat(Math.max(1, Math.floor(inner / motif.length))));
       clamp();
       const vp = viewport();
       const window = contentLines.slice(offset, offset + vp);

@@ -44,7 +44,9 @@
     "bash": [
       { "pattern": "rm\\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)[a-zA-Z]*\\s+(/|~|\\$HOME|\\$\\{HOME\\})(\\s|/|\\*|$)", "action": "block", "reason": "refusing recursive force-delete of root or home" },
       { "pattern": "git\\s+push\\s+[^\\n]*--force(?!-with-lease)", "action": "confirm", "reason": "force push" },
-      { "pattern": "curl[^|;&]*\\|\\s*(ba|z)?sh", "action": "confirm", "reason": "piping remote script to shell" },
+      { "pattern": "\\b(?:curl|wget|printf|echo)\\b[^|;&]*\\|\\s*(?:ba|z)?sh", "action": "confirm", "reason": "piping remote script to shell" },
+      { "pattern": "\\$[A-Za-z_]\\w*\\s+.*-\\w*r\\w*f", "action": "confirm", "reason": "variable expansion followed by rm-like flags (possible indirection evasion)" },
+      { "pattern": "\\$\\([^)]*\\)\\s+.*-\\w*r\\w*f", "action": "confirm", "reason": "command substitution followed by rm-like flags (possible indirection evasion)" },
       { "pattern": "git\\s+reset\\s+--hard", "action": "confirm", "reason": "discards local changes" }
     ],
     "paths": [

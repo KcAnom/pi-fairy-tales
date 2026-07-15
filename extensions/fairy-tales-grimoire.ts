@@ -71,7 +71,8 @@ export default function (pi: ExtensionAPI) {
             for (const l of wrapTextWithAnsi(theme.fg("text", rest.join(" ")), inner)) contentLines.push(` ${l}`);
             contentLines.push("");
           }
-          return bookOverlay({ title: "❦ The Grimoire ❦", contentLines, tui, theme, done });
+          const title = process.env.FTALES === "1" ? "❦ The Grimoire ❦" : "Grimoire";
+          return bookOverlay({ title, contentLines, tui, theme, done, branded: process.env.FTALES === "1" });
         },
         { overlay: true, overlayOptions: { anchor: "center", width: "80%" } },
       );

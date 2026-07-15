@@ -42,9 +42,10 @@ export default function (pi: ExtensionAPI) {
   let lastSeen: string | undefined; // undefined until the baseline read
   let selfSet: string | undefined; // /grab's own copies — already toasted there
 
-  pi.events.on(CLIP_MARK, (d: unknown) => {
+  const onClipMark = (d: unknown) => {
     selfSet = (d as { text?: string })?.text;
-  });
+  };
+  const unsubClipMark = pi.events.on(CLIP_MARK, onClipMark);
 
   pi.on("session_start", async (_event, ctx) => {
     if (!ctx.hasUI) return;
@@ -52,6 +53,7 @@ export default function (pi: ExtensionAPI) {
     if (cfg.ui?.clipboardNotify === false) return;
     if (timer) clearInterval(timer);
     lastSeen = undefined;
+    selfSet = undefined;
     timer = setInterval(async () => {
       const now = await readClipboard(cmd);
       if (now === undefined) return; // read failed — try again next tick
@@ -66,10 +68,16 @@ export default function (pi: ExtensionAPI) {
       const lines = now.split("\n").length;
       flashStatus(ctx.ui, "fairy-tales-clip", `⧉ Copied to clipboard (${lines} line${lines > 1 ? "s" : ""} · ${now.length} chars)`);
     }, POLL_MS);
+    timer.unref?.(); // don't keep the process alive solely for clipboard polling
   });
 
   pi.on("session_shutdown", async () => {
     if (timer) clearInterval(timer);
     timer = undefined;
+    try {
+      unsubClipMark();
+    } catch {
+      // best-effort: EventBus may already be torn down
+    }
   });
 }

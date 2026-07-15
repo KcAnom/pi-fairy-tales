@@ -13,12 +13,19 @@ export interface RuleVerdict {
  * Normalize a command so trivial evasions (quotes, $HOME/~ expansion) don't slip
  * past regex rules. Defense-in-depth, not a sandbox — we match rules against BOTH
  * the raw and normalized forms.
+ *
+ * This catches SYNTACTIC evasion — character-level tricks that hide dangerous
+ * commands from naive string/regex matching (quote-splitting, `$IFS` word
+ * splitting). It does NOT handle SEMANTIC indirection, where the dangerous
+ * command is assembled at runtime (e.g. `$(echo rm)`, `$CMD -rf`); that class
+ * of evasion is handled by the shipped confirm rules in fairy-tales.config.json.
  */
 export function normalizeCommand(command: string): string {
   return command
     .replace(/\\(["'])/g, "$1") // unescape escaped quotes
     .replace(/["']/g, "") // drop quotes: r""m -> rm
     .replace(/\$\{HOME\}|\$HOME|(?<=^|\s)~(?=\/|\s|$)/g, homedir())
+    .replace(/\$\{?IFS\}?/g, " ") // $IFS / ${IFS} word-splitting -> space (defeats `rm$IFS-rf$IFS/`)
     .replace(/\s+/g, " ")
     .trim();
 }

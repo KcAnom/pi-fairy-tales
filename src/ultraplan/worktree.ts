@@ -74,6 +74,12 @@ export function formatPatch(dir: string, baseRef: string, outFile: string): numb
   return diff.length;
 }
 
+/** Return the diff from `baseRef` to HEAD as an in-memory string (for the
+ *  diff-preview gate before landing an ultraplan result). */
+export function diffWorktree(dir: string, baseRef: string): string {
+  return git(dir, ["diff", baseRef, "HEAD"]);
+}
+
 export interface RemoteInfo {
   hasRemote: boolean;
   hasGh: boolean;

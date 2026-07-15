@@ -48,6 +48,13 @@ export interface FairyTalesConfig {
     maxConcurrent: number;
     maxTurnsPerRun: number;
     maxCostPerRunUsd: number;
+    /** Optional session-level spend ceiling. When exceeded, new subagent spawns
+     *  are blocked (the main conversation continues). undefined/0 = disabled. */
+    maxCostPerSessionUsd?: number;
+    /** TTL for subagent result memoization (ms). An identical (role, task,
+     *  context) run within this window reuses the cached result. Default
+     *  600000 (10 min); 0 disables. */
+    cacheTtlMs?: number;
     /** "tiered" = per-role tier models; "single" = every subagent uses singleModel;
      * "orchestrated" = tiered resolution + failed runs escalate to the "conductor"
      * tier, and the session model is aligned to the conductor at startup. */
@@ -65,7 +72,7 @@ export interface FairyTalesConfig {
     bashAppend?: BashRule[];
     /** Appended onto (not replacing) the shipped path rules. */
     pathsAppend?: PathRule[];
-    postEdit: { testCommandFile: string; enabled: boolean; timeoutMs?: number };
+    postEdit: { testCommandFile: string; enabled: boolean; timeoutMs?: number; testMapFile?: string };
   };
   web: { timeoutMs: number; maxBytes: number; blockPrivateHosts?: boolean };
   /** Optional compaction summarizer tier (falls back to the lead model). */
