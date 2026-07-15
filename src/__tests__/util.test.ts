@@ -28,6 +28,23 @@ describe("estimateCostUsd", () => {
   it("handles fractional Mtok correctly", () => {
     expect(estimateCostUsd(100_000, 50_000)).toBeCloseTo(0.3 + 0.75, 6);
   });
+
+  it("charges cache-read tokens at ~10% of input rate ($0.30/Mtok)", () => {
+    expect(estimateCostUsd(0, 0, 1_000_000, 0)).toBeCloseTo(0.3, 6);
+    const inputCost = estimateCostUsd(1_000_000, 0);
+    const cacheCost = estimateCostUsd(0, 0, 1_000_000, 0);
+    expect(cacheCost).toBeLessThan(inputCost);
+    expect(cacheCost).toBeCloseTo(inputCost * 0.1, 5);
+  });
+
+  it("charges cache-write tokens at ~125% of input rate ($3.75/Mtok)", () => {
+    expect(estimateCostUsd(0, 0, 0, 1_000_000)).toBeCloseTo(3.75, 6);
+    expect(estimateCostUsd(0, 0, 0, 1_000_000)).toBeGreaterThan(estimateCostUsd(1_000_000, 0));
+  });
+
+  it("combines all four token types additively", () => {
+    expect(estimateCostUsd(1_000_000, 1_000_000, 1_000_000, 1_000_000)).toBeCloseTo(3.0 + 15.0 + 0.3 + 3.75, 6);
+  });
 });
 
 describe("isTransientError", () => {

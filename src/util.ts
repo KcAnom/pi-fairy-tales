@@ -34,14 +34,27 @@ export function emptyAgentDir(): string {
 
 /**
  * Approximate USD cost from token counts when the provider reports $0
- * (subscription/flat-rate models). Rough blended rate; the point is a non-zero
- * number so the ledger and per-run cost cap remain meaningful.
+ * (subscription/flat-rate models). Cache reads charged at ~10% of input
+ * (prompt-cache hits are cheap); cache writes at ~125% of input (writing to the
+ * cache costs more than a regular read). Both default to 0 for backwards compat.
  */
-const DEFAULT_INPUT_PER_MTOK = 3.0; // USD per 1M input tokens (blended default)
+const DEFAULT_INPUT_PER_MTOK = 3.0;
 const DEFAULT_OUTPUT_PER_MTOK = 15.0;
+const DEFAULT_CACHE_READ_PER_MTOK = 0.3;
+const DEFAULT_CACHE_WRITE_PER_MTOK = 3.75;
 
-export function estimateCostUsd(inputTokens: number, outputTokens: number): number {
-  return (inputTokens / 1_000_000) * DEFAULT_INPUT_PER_MTOK + (outputTokens / 1_000_000) * DEFAULT_OUTPUT_PER_MTOK;
+export function estimateCostUsd(
+  inputTokens: number,
+  outputTokens: number,
+  cacheReadTokens = 0,
+  cacheWriteTokens = 0,
+): number {
+  return (
+    (inputTokens / 1_000_000) * DEFAULT_INPUT_PER_MTOK +
+    (outputTokens / 1_000_000) * DEFAULT_OUTPUT_PER_MTOK +
+    (cacheReadTokens / 1_000_000) * DEFAULT_CACHE_READ_PER_MTOK +
+    (cacheWriteTokens / 1_000_000) * DEFAULT_CACHE_WRITE_PER_MTOK
+  );
 }
 
 /**

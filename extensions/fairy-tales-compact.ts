@@ -95,11 +95,16 @@ export default function (pi: ExtensionAPI) {
       const unsub = (session as unknown as { subscribe(fn: (e: { type: string; [k: string]: unknown }) => void): () => void }).subscribe(
         (e) => {
           if (e.type !== "message_end") return;
-          const msg = e.message as { role?: string; usage?: { cost?: { total?: number }; input?: number; output?: number } };
+          const msg = e.message as {
+            role?: string;
+            usage?: { cost?: { total?: number }; input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+          };
           if (msg?.role === "assistant" && msg.usage) {
             sumIn += msg.usage.input ?? 0;
             sumOut += msg.usage.output ?? 0;
-            sumCost += (msg.usage.cost?.total ?? 0) || estimateCostUsd(msg.usage.input ?? 0, msg.usage.output ?? 0);
+            sumCost +=
+              (msg.usage.cost?.total ?? 0) ||
+              estimateCostUsd(msg.usage.input ?? 0, msg.usage.output ?? 0, msg.usage.cacheRead ?? 0, msg.usage.cacheWrite ?? 0);
           }
         },
       );

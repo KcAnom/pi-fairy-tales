@@ -15,6 +15,7 @@
 import { mkdirSync, writeFileSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -33,13 +34,15 @@ import webExtension from "../../extensions/fairy-tales-web.ts";
 
 /**
  * Orchestrated-mode escalation decision: a finished cheap-tier run whose result
- * failed (provider error, or the structured envelope says failed/blocked)
- * retries once on the conductor tier. Pure so it can be unit-tested.
+ * failed (provider error, the structured envelope says failed/blocked, OR the
+ * run hit a limit cap — turn or cost) retries once on the conductor tier. A
+ * user-initiated abort does NOT escalate (the user chose to stop). Pure so it
+ * can be unit-tested.
  */
 export function shouldEscalate(
   cfg: FairyTalesConfig,
   roleTier: string | undefined,
-  summary: { state: string },
+  summary: { state: string; cappedReason?: string },
   structured: unknown,
   alreadyEscalated: boolean,
 ): boolean {
@@ -47,6 +50,8 @@ export function shouldEscalate(
   if (!cfg.tiers?.conductor?.model) return false;
   if (roleTier === "conductor") return false;
   const status = (structured as { status?: string } | undefined)?.status?.toLowerCase();
+  // A limit-hit abort (cappedReason set) is incomplete work — escalate it.
+  if (summary.cappedReason) return true;
   return summary.state === "error" || status === "failed" || status === "blocked";
 }
 
@@ -367,48 +372,9 @@ export class AgentRunner {
     run.session = session;
     this.emitStatus();
 
-    let capped: string | undefined;
-    let tokens = 0;
-    let inTok = 0;
-    let outTok = 0;
-
-    const unsubscribe = session.subscribe((event) => {
-      if (event.type === "turn_start") {
-        summary.turns += 1;
-        if (summary.turns > cfg.agents.maxTurnsPerRun) {
-          capped = `turn cap (${cfg.agents.maxTurnsPerRun}) reached`;
-          summary.state = "aborted";
-          void session.abort();
-        }
-        this.emitStatus();
-      } else if (event.type === "message_end") {
-        const msg = event.message as
-          | { role?: string; usage?: { cost?: { total?: number }; totalTokens?: number; input?: number; output?: number } }
-          | undefined;
-        if (msg?.role === "assistant" && msg.usage) {
-          const reported = msg.usage.cost?.total ?? 0;
-          inTok += msg.usage.input ?? 0;
-          outTok += msg.usage.output ?? 0;
-          tokens += msg.usage.totalTokens ?? 0;
-          const cost = reported > 0 ? reported : estimateCostUsd(msg.usage.input ?? 0, msg.usage.output ?? 0);
-          summary.costUsd += cost;
-          if (cost > 0) this.onCost(cost);
-          if (summary.costUsd > cfg.agents.maxCostPerRunUsd) {
-            capped = `cost cap (${fmtUsd(cfg.agents.maxCostPerRunUsd)}) reached`;
-            summary.state = "aborted";
-            void session.abort();
-          }
-          this.emitStatus();
-        }
-      } else if (event.type === "tool_execution_start") {
-        const tool = event.toolName as string;
-        const input = event.args ?? event.input;
-        const detail = tool === "bash" ? String((input as { command?: string } | undefined)?.command ?? "").slice(0, 60) : "";
-        summary.lastActivity = detail ? `${tool}: ${detail}` : tool;
-        opts.onUpdate?.(summary.lastActivity);
-        this.emitStatus();
-      }
-    });
+    const accum = { tokens: 0, inTok: 0, outTok: 0 };
+    const tracker = this.attachTracker(session, summary, cfg, opts.onUpdate, accum);
+    const unsubscribe = tracker.unsubscribe;
 
     const onAbort = () => {
       if (summary.state === "running") {
@@ -436,6 +402,7 @@ export class AgentRunner {
         break;
       }
 
+      const capped = tracker.getCapped();
       const assistant = [...session.messages]
         .reverse()
         .find((m) => m.role === "assistant") as { errorMessage?: string; content?: unknown } | undefined;
@@ -454,7 +421,7 @@ export class AgentRunner {
 
       const structured = parseStructured(text);
       const elapsed = Date.now() - summary.startedAt;
-      summary.tokens = tokens || inTok + outTok;
+      summary.tokens = accum.tokens || accum.inTok + accum.outTok;
       const stats = `[${summary.role} · ${summary.model} · ${summary.turns} turns · ${fmtTokens(summary.tokens)} tok · ${fmtUsd(summary.costUsd)} · ${fmtDuration(elapsed)}]`;
       const result: RunResult = {
         text: `${warnings.map((w) => `⚠ ${w}\n`).join("")}${clipTail(text)}\n\n${stats}`,
@@ -500,6 +467,80 @@ export class AgentRunner {
     }
   }
 
+  /**
+   * Subscribe to a live session to track turns, tokens, cost (with the per-run
+   * cost cap), and activity. Shared by execute() and continue() so a follow-up
+   * conversation gets the SAME caps and cost attribution as the original run —
+   * previously continue() ran uncapped and uncosted.
+   */
+  private attachTracker(
+    session: LiveSession,
+    summary: RunSummary,
+    cfg: FairyTalesConfig,
+    onUpdate: ((activity: string) => void) | undefined,
+    accum: { tokens: number; inTok: number; outTok: number },
+  ): { unsubscribe: () => void; getCapped: () => string | undefined } {
+    let capped: string | undefined;
+    const unsubscribe = session.subscribe((event) => {
+      if (event.type === "turn_start") {
+        summary.turns += 1;
+        if (summary.turns > cfg.agents.maxTurnsPerRun) {
+          capped = `turn cap (${cfg.agents.maxTurnsPerRun}) reached`;
+          summary.cappedReason = capped;
+          summary.state = "aborted";
+          void session.abort();
+        }
+        this.emitStatus();
+      } else if (event.type === "message_end") {
+        const msg = event.message as
+          | {
+              role?: string;
+              usage?: {
+                cost?: { total?: number; cacheRead?: number; cacheWrite?: number };
+                totalTokens?: number;
+                input?: number;
+                output?: number;
+                cacheRead?: number;
+                cacheWrite?: number;
+              };
+            }
+          | undefined;
+        if (msg?.role === "assistant" && msg.usage) {
+          const reported = msg.usage.cost?.total ?? 0;
+          accum.inTok += msg.usage.input ?? 0;
+          accum.outTok += msg.usage.output ?? 0;
+          accum.tokens += msg.usage.totalTokens ?? 0;
+          const cost =
+            reported > 0
+              ? reported
+              : estimateCostUsd(
+                  msg.usage.input ?? 0,
+                  msg.usage.output ?? 0,
+                  msg.usage.cacheRead ?? msg.usage.cost?.cacheRead ?? 0,
+                  msg.usage.cacheWrite ?? msg.usage.cost?.cacheWrite ?? 0,
+                );
+          summary.costUsd += cost;
+          if (cost > 0) this.onCost(cost);
+          if (summary.costUsd > cfg.agents.maxCostPerRunUsd) {
+            capped = `cost cap (${fmtUsd(cfg.agents.maxCostPerRunUsd)}) reached`;
+            summary.cappedReason = capped;
+            summary.state = "aborted";
+            void session.abort();
+          }
+          this.emitStatus();
+        }
+      } else if (event.type === "tool_execution_start") {
+        const tool = event.toolName as string;
+        const input = event.args ?? event.input;
+        const detail = tool === "bash" ? String((input as { command?: string } | undefined)?.command ?? "").slice(0, 60) : "";
+        summary.lastActivity = detail ? `${tool}: ${detail}` : tool;
+        onUpdate?.(summary.lastActivity);
+        this.emitStatus();
+      }
+    });
+    return { unsubscribe, getCapped: () => capped };
+  }
+
   private lastAssistantError(session: LiveSession): string | undefined {
     const a = [...session.messages].reverse().find((m) => m.role === "assistant") as
       | { errorMessage?: string }
@@ -519,22 +560,45 @@ export class AgentRunner {
       };
     }
     const session = run.live;
+    const cfg = this.cfg();
+    const summary = run.summary;
+    const accum = { tokens: 0, inTok: 0, outTok: 0 };
+    // Follow-ups get the SAME caps and cost attribution as the original run —
+    // turn-cap and cost-cap continue from where the first run left off, and new
+    // spend is reported through onCost so the ledger and footer stay accurate.
+    const tracker = this.attachTracker(session, summary, cfg, undefined, accum);
     const onAbort = () => void session.abort();
     signal?.addEventListener("abort", onAbort, { once: true });
     const g = globalThis as Record<string, unknown>;
     g.__fairyTalesDepth = ((g.__fairyTalesDepth as number | undefined) ?? 0) + 1;
     try {
-      run.summary.state = "running";
+      summary.state = "running";
       this.emitStatus();
       await session.prompt(task);
-      const assistant = [...session.messages].reverse().find((m) => m.role === "assistant");
-      const text = extractText(assistant).trim() || "(no reply)";
-      run.summary.state = "done";
-      const result: RunResult = { text: clipTail(text), summary: run.summary, warnings: [], structured: parseStructured(text) };
+      const capped = tracker.getCapped();
+      const assistant = [...session.messages].reverse().find((m) => m.role === "assistant") as
+        | { errorMessage?: string; content?: unknown }
+        | undefined;
+      let text = extractText(assistant).trim();
+      const warnings: string[] = [];
+      if (assistant?.errorMessage && !(capped || summary.state === "aborted")) {
+        summary.state = "error";
+        text = `${text ? `${text}\n\n` : ""}Provider error in continued agent (model ${summary.model}): ${assistant.errorMessage}`;
+        warnings.push("The continued agent's model call failed.");
+      } else if (assistant?.errorMessage) {
+        text = text || "(run aborted)";
+      } else if (!text) {
+        text = "(no reply)";
+      }
+      if (capped) warnings.push(`Run stopped early: ${capped}. The result below may be incomplete.`);
+      if (summary.state === "running") summary.state = "done";
+      summary.tokens = (summary.tokens ?? 0) + (accum.tokens || accum.inTok + accum.outTok);
+      const result: RunResult = { text: clipTail(text), summary, warnings, structured: parseStructured(text) };
       run.result = result;
       this.emitStatus();
       return result;
     } finally {
+      tracker.unsubscribe();
       g.__fairyTalesDepth = Math.max(0, ((g.__fairyTalesDepth as number | undefined) ?? 1) - 1);
       signal?.removeEventListener("abort", onAbort);
     }

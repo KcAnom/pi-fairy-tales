@@ -68,11 +68,14 @@ export default function (pi: ExtensionAPI) {
   pi.on("message_end", async (event) => {
     const msg = event.message as {
       role?: string;
-      usage?: { cost?: { total?: number }; input?: number; output?: number };
+      usage?: { cost?: { total?: number }; input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
     };
     if (msg.role === "assistant" && msg.usage) {
       const reported = msg.usage.cost?.total ?? 0;
-      goldUsd += reported > 0 ? reported : estimateCostUsd(msg.usage.input ?? 0, msg.usage.output ?? 0);
+      goldUsd +=
+        reported > 0
+          ? reported
+          : estimateCostUsd(msg.usage.input ?? 0, msg.usage.output ?? 0, msg.usage.cacheRead ?? 0, msg.usage.cacheWrite ?? 0);
       scheduleRender();
     }
   });
@@ -261,12 +264,15 @@ export default function (pi: ExtensionAPI) {
         const unsub = (session as unknown as { subscribe(fn: (e: { type: string; [k: string]: unknown }) => void): () => void }).subscribe(
           (e) => {
             if (e.type === "message_end") {
-              const u = (e.message as { role?: string; usage?: { cost?: { total?: number }; input?: number; output?: number } })?.usage;
+              const u = (e.message as {
+                role?: string;
+                usage?: { cost?: { total?: number }; input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+              })?.usage;
               const role = (e.message as { role?: string })?.role;
               if (role === "assistant" && u) {
                 taleIn += u.input ?? 0;
                 taleOut += u.output ?? 0;
-                taleCost += (u.cost?.total ?? 0) || estimateCostUsd(u.input ?? 0, u.output ?? 0);
+                taleCost += (u.cost?.total ?? 0) || estimateCostUsd(u.input ?? 0, u.output ?? 0, u.cacheRead ?? 0, u.cacheWrite ?? 0);
               }
             }
           },

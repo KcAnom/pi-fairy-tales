@@ -44,7 +44,9 @@ export default function (pi: ExtensionAPI) {
     main.output += u.output ?? 0;
     mainCacheRead += u.cacheRead ?? 0;
     mainCacheWrite += u.cacheWrite ?? 0;
-    main.usd += (u.cost?.total ?? 0) || estimateCostUsd(u.input ?? 0, u.output ?? 0);
+    main.usd +=
+      (u.cost?.total ?? 0) ||
+      estimateCostUsd(u.input ?? 0, u.output ?? 0, u.cacheRead ?? 0, u.cacheWrite ?? 0);
   };
 
   const recordRunDetails = (details: unknown) => {

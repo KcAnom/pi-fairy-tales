@@ -75,11 +75,14 @@ export default function (pi: ExtensionAPI) {
   pi.on("message_end", async (event, ctx) => {
     const msg = event.message as {
       role?: string;
-      usage?: { cost?: { total?: number }; input?: number; output?: number };
+      usage?: { cost?: { total?: number }; input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
     };
     if (msg.role === "assistant" && msg.usage) {
       const reported = msg.usage.cost?.total ?? 0;
-      costUsd += reported > 0 ? reported : estimateCostUsd(msg.usage.input ?? 0, msg.usage.output ?? 0);
+      costUsd +=
+        reported > 0
+          ? reported
+          : estimateCostUsd(msg.usage.input ?? 0, msg.usage.output ?? 0, msg.usage.cacheRead ?? 0, msg.usage.cacheWrite ?? 0);
       update(ctx);
     }
   });

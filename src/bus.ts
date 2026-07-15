@@ -22,6 +22,9 @@ export interface RunSummary {
   lastActivity: string;
   background: boolean;
   state: "queued" | "running" | "done" | "error" | "aborted";
+  /** Set when the run was aborted by a LIMIT (turn cap / cost cap), not a user
+   *  abort. Orchestrated-mode escalation keys off this; a user abort does not. */
+  cappedReason?: string;
   tokens?: number;
   transcriptPath?: string;
   /** Tier the model was resolved from ("session" when following the lead model). */
