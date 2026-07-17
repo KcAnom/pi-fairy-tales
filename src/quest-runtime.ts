@@ -51,6 +51,15 @@ export class QuestRuntime {
     return claimed;
   }
 
+  /** Claim one specific eligible quest and start heartbeating it. */
+  claimById(id: string, project: string, onLeaseLost?: () => void): ClaimedQuest | undefined {
+    if (this.closed) return undefined;
+    const claimed = this.store.claimById(id, project, this.ownerSession);
+    if (!claimed) return undefined;
+    this.track(claimed.lease, onLeaseLost);
+    return claimed;
+  }
+
   /** True while this session still holds the lease for a quest. */
   owns(questId: string): boolean {
     const claim = this.active.get(questId);

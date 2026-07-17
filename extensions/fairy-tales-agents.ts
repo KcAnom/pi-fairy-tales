@@ -31,6 +31,7 @@ import { AgentRunner, shouldEscalate, type RunResult } from "../src/subagent/eng
 import { QuestStore, type QuestRecord } from "../src/quest-store.ts";
 import { QuestRuntime, type ClaimedQuest } from "../src/quest-runtime.ts";
 import { QuestScheduler } from "../src/quest-scheduler.ts";
+import { questDashboard, questTableText } from "../src/quest-dashboard.ts";
 import { AGENTS_STATUS, COST_ADD, type CostAddPayload, type RunSummary } from "../src/bus.ts";
 import { fmtDuration, fmtUsd, fmtTokens, shortModelId } from "../src/text.ts";
 import { createSpendTracker } from "../src/spend.ts";
@@ -502,16 +503,43 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("quests", {
-    description: "Show the durable quest queue and journal for this project",
+    description: "Quest dashboard: filter, search, inspect, run/retry/cancel durable quests",
     handler: async (_args, ctx) => {
       cfg = loadFairyTalesConfig(ctx.cwd);
       if (!questStore || !questRuntime) openQuestStore(ctx.cwd);
-      const rows = questStore!.list(ctx.cwd);
       const s = questScheduler?.status();
       const schedLine = s
-        ? `scheduler: ${s.pausedReason ? `paused (${s.pausedReason})` : s.leaseHeld ? "active" : "standby (lease held elsewhere)"} · ${s.inFlight} in flight\n`
-        : cfg.scheduler?.enabled ? "scheduler: enabled (starts with the session)\n" : "";
-      if (ctx.hasUI) ctx.ui.notify(schedLine + (rows.length ? rows.map(questLine).slice(0, 8).join("\n") : "No quests for this project."), "info");
+        ? `scheduler: ${s.pausedReason ? `paused (${s.pausedReason})` : s.leaseHeld ? "active" : "standby (lease held elsewhere)"} · ${s.inFlight} in flight`
+        : cfg.scheduler?.enabled ? "scheduler: enabled (starts with the session)" : "";
+      const textFallback = () => {
+        const rows = questStore!.list(ctx.cwd, 50);
+        return (schedLine ? `${schedLine}\n` : "") + questTableText(rows);
+      };
+      if (!ctx.hasUI) {
+        console.log(textFallback());
+        return;
+      }
+      const actions = {
+        run: (id: string) => {
+          const claimed = questRuntime!.claimById(id, ctx.cwd);
+          if (!claimed) return `cannot claim ${id} — blocked, scheduled later, in backoff, or already running`;
+          void runClaimedQuest(claimed, ctx, true).catch(() => { /* recorded on the quest */ });
+          return undefined;
+        },
+        retry: (id: string) => (questStore!.requeue(id, ctx.cwd) ? undefined : `cannot requeue ${id}`),
+        cancel: (id: string) => (questStore!.cancel(id, ctx.cwd) ? undefined : `cannot cancel ${id}`),
+      };
+      try {
+        await ctx.ui.custom(
+          (tui: unknown, theme: { fg(c: string, s: string): string; bold(s: string): string }, _kb: unknown, done: (v: undefined) => void) =>
+            questDashboard({ tui, theme, done, store: questStore!, project: ctx.cwd, actions, branded: process.env.FTALES === "1" }),
+          { overlay: true, overlayOptions: { anchor: "center", width: "90%" } },
+        );
+      } catch {
+        // overlay unsupported (RPC) — plain-text fallback
+        ctx.ui.notify(textFallback(), "info");
+      }
+      updateQuestWidget();
     },
   });
 

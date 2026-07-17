@@ -105,6 +105,18 @@ export interface QuestStoreOptions {
   backoffBaseMs?: number;
 }
 
+/** Shared claim-eligibility predicate (parameters: now ×3). Runnable states
+ *  gated on schedule and retry backoff, expired-lease reclamation, and no
+ *  unfinished dependencies. */
+const ELIGIBLE_SQL = `(
+    (state IN ('queued','interrupted') AND scheduled_at <= ? AND COALESCE(retry_at, 0) <= ?)
+    OR (state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?)
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM quest_deps d JOIN quests dq ON dq.id = d.depends_on
+    WHERE d.quest_id = q.id AND dq.state != 'done'
+  )`;
+
 const DEFAULT_LEASE_TTL_MS = 120_000;
 const DEFAULT_MAX_ATTEMPTS = 1;
 const DEFAULT_BACKOFF_BASE_MS = 30_000;
@@ -317,32 +329,59 @@ export class QuestStore {
       this.sweepFailedDeps(normalized, now);
       const row = this.db.prepare(
         `SELECT id, state FROM quests q
-         WHERE project = ?
-           AND (
-             (state IN ('queued','interrupted') AND scheduled_at <= ? AND COALESCE(retry_at, 0) <= ?)
-             OR (state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?)
-           )
-           AND NOT EXISTS (
-             SELECT 1 FROM quest_deps d JOIN quests dq ON dq.id = d.depends_on
-             WHERE d.quest_id = q.id AND dq.state != 'done'
-           )
+         WHERE project = ? AND ${ELIGIBLE_SQL}
          ORDER BY priority DESC, created_at ASC LIMIT 1`,
       ).get(normalized, now, now, now) as { id?: string; state?: QuestState } | undefined;
       if (!row?.id) return undefined;
-      const reclaimed = row.state === "running";
-      this.db.prepare(
-        `UPDATE quests SET state='running', attempts=attempts+1, lease_gen=lease_gen+1,
-                owner_session=?, agent_run_id=NULL, started_at=?, finished_at=NULL, heartbeat_at=?,
-                lease_expires_at=?, retry_at=NULL, error=NULL, updated_at=?
-         WHERE id=?`,
-      ).run(ownerSession, now, now, now + this.leaseTtlMs, now, row.id);
-      const quest = this.get(row.id)!;
-      this.db.prepare(
-        `INSERT OR REPLACE INTO quest_runs (quest_id, attempt, owner_session, lease_gen, turns, tokens, cost_usd, started_at)
-         VALUES (?, ?, ?, ?, 0, 0, 0, ?)`,
-      ).run(row.id, quest.attempts, ownerSession, quest.leaseVersion, now);
-      this.event(row.id, reclaimed ? "reclaimed" : "claimed", { attempt: quest.attempts, leaseVersion: quest.leaseVersion, ownerSession });
-      return { quest, lease: { id: row.id, ownerSession, version: quest.leaseVersion } };
+      return this.claimRow(row.id, row.state!, ownerSession, now);
+    });
+  }
+
+  /** Claim one specific quest (targeted claim, e.g. dashboard "run" or a chain
+   *  step). Fails when the quest is ineligible: wrong state, scheduled later,
+   *  in retry backoff, dependency-blocked, or running under a live lease. */
+  claimById(id: string, project: string, ownerSession = "legacy"): { quest: QuestRecord; lease: QuestLease } | undefined {
+    const normalized = resolve(project);
+    const now = Date.now();
+    return this.tx(() => {
+      this.sweepFailedDeps(normalized, now);
+      const row = this.db.prepare(
+        `SELECT id, state FROM quests q WHERE id = ? AND project = ? AND ${ELIGIBLE_SQL}`,
+      ).get(id, normalized, now, now, now) as { id?: string; state?: QuestState } | undefined;
+      if (!row?.id) return undefined;
+      return this.claimRow(row.id, row.state!, ownerSession, now);
+    });
+  }
+
+  private claimRow(id: string, state: QuestState, ownerSession: string, now: number): { quest: QuestRecord; lease: QuestLease } {
+    const reclaimed = state === "running";
+    this.db.prepare(
+      `UPDATE quests SET state='running', attempts=attempts+1, lease_gen=lease_gen+1,
+              owner_session=?, agent_run_id=NULL, started_at=?, finished_at=NULL, heartbeat_at=?,
+              lease_expires_at=?, retry_at=NULL, error=NULL, updated_at=?
+       WHERE id=?`,
+    ).run(ownerSession, now, now, now + this.leaseTtlMs, now, id);
+    const quest = this.get(id)!;
+    this.db.prepare(
+      `INSERT OR REPLACE INTO quest_runs (quest_id, attempt, owner_session, lease_gen, turns, tokens, cost_usd, started_at)
+       VALUES (?, ?, ?, ?, 0, 0, 0, ?)`,
+    ).run(id, quest.attempts, ownerSession, quest.leaseVersion, now);
+    this.event(id, reclaimed ? "reclaimed" : "claimed", { attempt: quest.attempts, leaseVersion: quest.leaseVersion, ownerSession });
+    return { quest, lease: { id, ownerSession, version: quest.leaseVersion } };
+  }
+
+  /** Explicitly requeue a terminal (failed/cancelled) or interrupted quest,
+   *  granting one more attempt if its retry budget is exhausted. */
+  requeue(id: string, project: string): boolean {
+    const now = Date.now();
+    return this.tx(() => {
+      const changed = Number(this.db.prepare(
+        `UPDATE quests SET state='queued', retry_at=NULL, finished_at=NULL,
+                max_attempts=MAX(max_attempts, attempts + 1), updated_at=?
+         WHERE id=? AND project=? AND state IN ('failed','cancelled','interrupted')`,
+      ).run(now, id, resolve(project)).changes) > 0;
+      if (changed) this.event(id, "requeued", {});
+      return changed;
     });
   }
 
