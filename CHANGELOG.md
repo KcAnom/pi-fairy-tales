@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 — 2026-07-17
+
+The durable-work release: quests become a crash-safe, schedulable, observable work substrate, chains get a real state contract, and the codebase gets an import-graph brain.
 
 **New capability**
 - **Durable quest queue and journal** — the new `quest` tool and `/quests` command persist role-specialized work in a provider-neutral SQLite WAL database. Quests can be queued, atomically claimed, inspected, cancelled, recovered after graceful session interruption, and optionally auto-resumed. Session ownership and agent-run guards prevent concurrent or stale callbacks from corrupting results; `/doctor` verifies database integrity.

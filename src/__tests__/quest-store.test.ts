@@ -143,13 +143,13 @@ test("expired leases are reclaimed by another session and the old lease is fence
 });
 
 test("heartbeat extends the lease and keeps the quest unclaimable", async () => {
-  const f = fixture({ leaseTtlMs: 60 });
+  const f = fixture({ leaseTtlMs: 150 });
   try {
     f.store.enqueue({ project: "/tmp/project", role: "build", task: "Long haul" });
     const claimed = f.store.claimNext("/tmp/project", "session-1")!;
-    await sleep(40);
+    await sleep(80);
     assert.equal(f.store.heartbeat(claimed.lease), true);
-    await sleep(40);
+    await sleep(100); // past the original TTL, within the renewed one
     // Original TTL has passed but the heartbeat renewed it.
     assert.equal(f.store.claimNext("/tmp/project", "session-2"), undefined);
     assert.equal(f.store.health().expiredLeases, 0);

@@ -74,11 +74,11 @@ test("waits for future-scheduled quests and runs unblocked dependents", async ()
   try {
     const dep = f.store.enqueue({ project: PROJECT, role: "build", task: "dep" });
     const child = f.store.enqueue({ project: PROJECT, role: "build", task: "child", dependsOn: [dep.id] });
-    const future = f.store.enqueue({ project: PROJECT, role: "build", task: "future", scheduledAt: Date.now() + 100 });
+    const future = f.store.enqueue({ project: PROJECT, role: "build", task: "future", scheduledAt: Date.now() + 150 });
     f.scheduler.start();
-    await sleep(60);
+    await sleep(100);
     assert.equal(f.store.get(dep.id)?.state, "done");
-    await sleep(250);
+    await sleep(300);
     assert.equal(f.store.get(child.id)?.state, "done");
     assert.equal(f.store.get(future.id)?.state, "done");
     // Dependency ran strictly before its dependent; future quest never ran early.

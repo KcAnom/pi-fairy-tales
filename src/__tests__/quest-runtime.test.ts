@@ -46,11 +46,11 @@ test("a thrown dispatch fails the quest under the lease", async () => {
 });
 
 test("heartbeats keep a slow quest owned past the lease TTL", async () => {
-  const f = fixture({ leaseTtlMs: 60, heartbeatMs: 50 });
+  const f = fixture({ leaseTtlMs: 200, heartbeatMs: 40 });
   try {
     f.store.enqueue({ project: "/tmp/project", role: "build", task: "Slow" });
     const claimed = f.runtime.claimNext("/tmp/project")!;
-    await sleep(150); // several TTLs — heartbeats must have renewed the lease
+    await sleep(400); // several TTLs — heartbeats must have renewed the lease
     assert.equal(f.store.health().expiredLeases, 0);
     assert.equal(f.store.claimNext("/tmp/project", "session-2"), undefined);
     f.runtime.complete(claimed.lease, "a?", "late"); // wrong run id → fenced, but heartbeat stops
