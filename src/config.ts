@@ -113,6 +113,9 @@ export interface FairyTalesConfig {
     /** Role used for execution (edits/writes). */
     buildRole: string;
   };
+  /** Read-only codebase intelligence (import graph, impact, hotspots).
+   *  Kill switch: set enabled=false to disable the codebase_intel tool. */
+  codeIntel?: { enabled: boolean };
   /** Named model lineups switchable with /loadout. */
   loadouts?: Record<string, Loadout>;
   /** UI preferences + internal state persisted by the brand extension. */

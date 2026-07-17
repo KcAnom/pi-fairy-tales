@@ -54,6 +54,9 @@
     "pollMs": 5000,
     "maxConcurrent": 2
   },
+  "codeIntel": {
+    "enabled": true
+  },
   "hooks": {
     "bash": [
       { "pattern": "rm\\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)[a-zA-Z]*\\s+(/|~|\\$HOME|\\$\\{HOME\\})(\\s|/|\\*|$)", "action": "block", "reason": "refusing recursive force-delete of root or home" },
