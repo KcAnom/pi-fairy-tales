@@ -79,6 +79,15 @@ export interface FairyTalesConfig {
     /** Base delay for exponential retry backoff (ms). */
     backoffBaseMs?: number;
   };
+  /** Persistent quest scheduler: continuously drains the queue in the lead
+   *  session. OFF by default — manual `quest run` behavior is unchanged. */
+  scheduler?: {
+    enabled: boolean;
+    /** Drain-loop interval (ms). Default 5000. */
+    pollMs?: number;
+    /** Max scheduler-claimed quests in flight at once. Default 2. */
+    maxConcurrent?: number;
+  };
   hooks: {
     bash: BashRule[];
     paths: PathRule[];

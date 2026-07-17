@@ -30,6 +30,7 @@ import { bookOverlay } from "../src/overlay.ts";
 import { AgentRunner, shouldEscalate, type RunResult } from "../src/subagent/engine.ts";
 import { QuestStore, type QuestRecord } from "../src/quest-store.ts";
 import { QuestRuntime, type ClaimedQuest } from "../src/quest-runtime.ts";
+import { QuestScheduler } from "../src/quest-scheduler.ts";
 import { AGENTS_STATUS, COST_ADD, type CostAddPayload, type RunSummary } from "../src/bus.ts";
 import { fmtDuration, fmtUsd, fmtTokens, shortModelId } from "../src/text.ts";
 import { createSpendTracker } from "../src/spend.ts";
@@ -49,6 +50,7 @@ export default function (pi: ExtensionAPI) {
   let cfg: FairyTalesConfig | undefined;
   let questStore: QuestStore | undefined;
   let questRuntime: QuestRuntime | undefined;
+  let questScheduler: QuestScheduler | undefined;
   let projectCwd = process.cwd();
   let sessionOwner = randomUUID();
   let shuttingDown = false;
@@ -113,7 +115,7 @@ export default function (pi: ExtensionAPI) {
     } catch { /* store may be closing during reload */ }
   };
 
-  const runClaimedQuest = async (claimed: ClaimedQuest, ctx: any, background: boolean, signal?: AbortSignal): Promise<RunResult | { id: string }> => {
+  const runClaimedQuest = async (claimed: ClaimedQuest, ctx: any, background: boolean, signal?: AbortSignal): Promise<RunResult | { id: string; settled: Promise<void> }> => {
     const runtime = questRuntime;
     if (!runtime) throw new Error("Quest journal is not initialized");
     const { quest, lease } = claimed;
@@ -156,7 +158,7 @@ export default function (pi: ExtensionAPI) {
       updateQuestWidget();
     };
     if (background) {
-      spawned.promise.then((result) => {
+      const settled = spawned.promise.then((result) => {
         settle(result);
         try {
           pi.sendMessage({ customType: "fairy-tales-quest-result", content: `Quest ${quest.id} “${quest.name}” completed:\n\n${result.text}`, display: true }, { deliverAs: "steer", triggerTurn: true });
@@ -167,7 +169,7 @@ export default function (pi: ExtensionAPI) {
           pi.sendMessage({ customType: "fairy-tales-quest-result", content: `Quest ${quest.id} “${quest.name}” failed: ${String(err)}`, display: true }, { deliverAs: "steer", triggerTurn: true });
         } catch { /* session changed */ }
       });
-      return { id: spawned.id };
+      return { id: spawned.id, settled };
     }
     try {
       const result = await spawned.promise;
@@ -201,10 +203,35 @@ export default function (pi: ExtensionAPI) {
     shuttingDown = false;
     uiRef = ctx;
     spend.reset();
+    questScheduler?.stop();
+    questScheduler = undefined;
     openQuestStore(ctx.cwd);
     try { questStore?.reclaimExpired(ctx.cwd); } catch { /* visibility only */ }
     updateQuestWidget();
-    if (cfg.quests.autoResume) {
+    if (cfg.scheduler?.enabled && questRuntime) {
+      // Persistent scheduler drains the whole queue (including interrupted
+      // work), so the single-shot autoResume claim is subsumed by it.
+      questScheduler = new QuestScheduler({
+        runtime: questRuntime,
+        project: ctx.cwd,
+        pollMs: cfg.scheduler.pollMs,
+        maxConcurrent: cfg.scheduler.maxConcurrent,
+        isPaused: () => {
+          const cap = (cfg ?? loadFairyTalesConfig(projectCwd)).agents.maxCostPerSessionUsd;
+          return cap && spend.exceeded(cap) ? `session cost cap ${fmtUsd(cap)} reached` : undefined;
+        },
+        dispatch: async (claimed) => {
+          const out = await runClaimedQuest(claimed, ctx, true);
+          await (out as { settled: Promise<void> }).settled;
+        },
+        onError: (err) => {
+          if (ctx.hasUI) {
+            try { ctx.ui.notify(`Quest scheduler: ${String(err)}`, "error"); } catch { /* stale ui */ }
+          }
+        },
+      });
+      questScheduler.start();
+    } else if (cfg.quests.autoResume) {
       const next = questRuntime?.claimNext(ctx.cwd);
       if (next) void runClaimedQuest(next, ctx, true).catch((err) => {
         if (ctx.hasUI) ctx.ui.notify(`Auto-resume failed for ${next.quest.id}: ${String(err)}`, "error");
@@ -237,6 +264,8 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async () => {
     shuttingDown = true;
+    questScheduler?.stop();
+    questScheduler = undefined;
     await runner.abortAll();
     try { questRuntime?.shutdown(projectCwd); } catch { /* best effort */ }
     try { questStore?.close(); } catch { /* already closed */ }
@@ -478,7 +507,11 @@ export default function (pi: ExtensionAPI) {
       cfg = loadFairyTalesConfig(ctx.cwd);
       if (!questStore || !questRuntime) openQuestStore(ctx.cwd);
       const rows = questStore!.list(ctx.cwd);
-      if (ctx.hasUI) ctx.ui.notify(rows.length ? rows.map(questLine).slice(0, 8).join("\n") : "No quests for this project.", "info");
+      const s = questScheduler?.status();
+      const schedLine = s
+        ? `scheduler: ${s.pausedReason ? `paused (${s.pausedReason})` : s.leaseHeld ? "active" : "standby (lease held elsewhere)"} · ${s.inFlight} in flight\n`
+        : cfg.scheduler?.enabled ? "scheduler: enabled (starts with the session)\n" : "";
+      if (ctx.hasUI) ctx.ui.notify(schedLine + (rows.length ? rows.map(questLine).slice(0, 8).join("\n") : "No quests for this project."), "info");
     },
   });
 

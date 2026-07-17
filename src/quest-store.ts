@@ -108,7 +108,7 @@ export interface QuestStoreOptions {
 const DEFAULT_LEASE_TTL_MS = 120_000;
 const DEFAULT_MAX_ATTEMPTS = 1;
 const DEFAULT_BACKOFF_BASE_MS = 30_000;
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 interface QuestRow {
   id: string;
@@ -500,6 +500,29 @@ export class QuestStore {
     });
   }
 
+  /**
+   * Acquire or renew the per-project scheduler lease. At most one scheduler
+   * per project across all sessions: succeeds when the slot is free, expired,
+   * or already ours (renewal). Returns false while another owner holds it.
+   */
+  acquireSchedulerLease(project: string, owner: string, ttlMs: number): boolean {
+    const now = Date.now();
+    const normalized = resolve(project);
+    return this.tx(() => {
+      const row = this.db.prepare("SELECT owner, expires_at FROM scheduler_leases WHERE project=?")
+        .get(normalized) as { owner?: string; expires_at?: number } | undefined;
+      if (row?.owner && row.owner !== owner && (row.expires_at ?? 0) >= now) return false;
+      this.db.prepare(
+        "INSERT INTO scheduler_leases (project, owner, expires_at) VALUES (?, ?, ?) ON CONFLICT(project) DO UPDATE SET owner=excluded.owner, expires_at=excluded.expires_at",
+      ).run(normalized, owner, now + Math.max(1, ttlMs));
+      return true;
+    });
+  }
+
+  releaseSchedulerLease(project: string, owner: string): void {
+    this.db.prepare("DELETE FROM scheduler_leases WHERE project=? AND owner=?").run(resolve(project), owner);
+  }
+
   events(id: string, limit = 50): Array<{ event: string; at: number; data: unknown }> {
     const rows = this.db.prepare(
       "SELECT event, at, data FROM quest_events WHERE quest_id=? ORDER BY seq DESC LIMIT ?",
@@ -671,6 +694,11 @@ export class QuestStore {
           quest_id TEXT NOT NULL REFERENCES quests(id) ON DELETE CASCADE,
           depends_on TEXT NOT NULL,
           PRIMARY KEY (quest_id, depends_on)
+        );
+        CREATE TABLE IF NOT EXISTS scheduler_leases (
+          project TEXT PRIMARY KEY,
+          owner TEXT NOT NULL,
+          expires_at INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS quest_runs (
           quest_id TEXT NOT NULL REFERENCES quests(id) ON DELETE CASCADE,
