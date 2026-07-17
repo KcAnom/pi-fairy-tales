@@ -442,17 +442,25 @@ export default function (pi: ExtensionAPI) {
       "Use action 'run' to claim and dispatch the oldest queued/interrupted quest for this project.",
     ],
     parameters: Type.Object({
-      action: StringEnum(["enqueue", "run", "list", "get", "events", "cancel"] as const),
+      action: StringEnum(["enqueue", "run", "list", "get", "events", "cancel", "requeue", "consume"] as const),
       role: Type.Optional(StringEnum(roleEnum)),
       task: Type.Optional(Type.String({ description: "Self-contained task for enqueue" })),
       context: Type.Optional(Type.String({ description: "Extra context for the delegated agent" })),
       name: Type.Optional(Type.String({ description: "Short quest name" })),
-      id: Type.Optional(Type.String({ description: "Quest id for get/events/cancel" })),
+      id: Type.Optional(Type.String({ description: "Quest id for get/events/cancel/requeue/consume, or a targeted run" })),
       background: Type.Optional(Type.Boolean({ description: "For run: return immediately and deliver the result later (default true)" })),
       priority: Type.Optional(Type.Integer({ description: "For enqueue: higher runs first (default 0)" })),
       dependsOn: Type.Optional(Type.Array(Type.String(), { description: "For enqueue: quest ids that must complete first" })),
       maxAttempts: Type.Optional(Type.Integer({ description: "For enqueue: failure retry budget (default from config; 1 = no retries)" })),
       notBefore: Type.Optional(Type.String({ description: "For enqueue: ISO timestamp before which the quest must not run" })),
+      dedupeKey: Type.Optional(Type.String({ description: "For enqueue: idempotency key — an active (or retained-unconsumed) quest with the same key is returned instead of creating a duplicate" })),
+      chain: Type.Optional(Type.Object({
+        chain: Type.Optional(Type.String()),
+        runId: Type.Optional(Type.String()),
+        phase: Type.Optional(Type.String()),
+        workId: Type.Optional(Type.String()),
+      }, { description: "For enqueue: chain metadata linking this quest to a durable skill chain" })),
+      retainUntilConsumed: Type.Optional(Type.Boolean({ description: "For enqueue: keep the result (and dedupe identity) until action 'consume' is called" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       cfg = loadFairyTalesConfig(ctx.cwd);
@@ -464,13 +472,19 @@ export default function (pi: ExtensionAPI) {
         const q = questStore!.enqueue({
           project: ctx.cwd, role: params.role, task: params.task, context: params.context, name: params.name,
           priority: params.priority, dependsOn: params.dependsOn, maxAttempts: params.maxAttempts, scheduledAt,
+          dedupeKey: params.dedupeKey, chain: params.chain, retainUntilConsumed: params.retainUntilConsumed,
         });
         updateQuestWidget();
-        return { content: [{ type: "text", text: `Queued ${questLine(q)}\nRun it with quest action='run'.` }], details: { quest: q } };
+        const dedupeNote = params.dedupeKey && questStore!.events(q.id, 1)[0]?.event === "deduped" ? " (existing quest returned by dedupeKey)" : "";
+        return { content: [{ type: "text", text: `Queued ${questLine(q)}${dedupeNote}\nRun it with quest action='run'.` }], details: { quest: q } };
       }
       if (params.action === "run") {
-        const claimed = questRuntime!.claimNext(ctx.cwd);
-        if (!claimed) return { content: [{ type: "text", text: "No claimable quests for this project (queued work may be scheduled later, waiting on retry backoff, or blocked on dependencies)." }] };
+        const claimed = params.id ? questRuntime!.claimById(params.id, ctx.cwd) : questRuntime!.claimNext(ctx.cwd);
+        if (!claimed) {
+          return { content: [{ type: "text", text: params.id
+            ? `Cannot claim ${params.id} — it may be blocked on dependencies, scheduled later, in retry backoff, already running, or finished.`
+            : "No claimable quests for this project (queued work may be scheduled later, waiting on retry backoff, or blocked on dependencies)." }] };
+        }
         const background = params.background !== false;
         const outcome = await runClaimedQuest(claimed, ctx, background, _signal);
         const text = background
@@ -487,6 +501,15 @@ export default function (pi: ExtensionAPI) {
         const cancelled = questStore!.cancel(params.id, ctx.cwd);
         updateQuestWidget();
         return { content: [{ type: "text", text: cancelled ? `Cancelled ${params.id}.` : `${params.id} is not queued/interrupted or does not exist.` }] };
+      }
+      if (params.action === "requeue") {
+        const requeued = questStore!.requeue(params.id, ctx.cwd);
+        updateQuestWidget();
+        return { content: [{ type: "text", text: requeued ? `Requeued ${params.id} with one more attempt available.` : `${params.id} is not failed/cancelled/interrupted or does not exist.` }] };
+      }
+      if (params.action === "consume") {
+        const consumed = questStore!.markConsumed(params.id, ctx.cwd);
+        return { content: [{ type: "text", text: consumed ? `Marked ${params.id} consumed — its dedupeKey is free for a fresh run.` : `${params.id} is not an unconsumed done quest in this project.` }] };
       }
       const q = questStore!.get(params.id);
       if (!q || q.project !== resolve(ctx.cwd)) return { content: [{ type: "text", text: `Unknown quest ${params.id} in this project.` }] };

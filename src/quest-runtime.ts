@@ -91,6 +91,12 @@ export class QuestRuntime {
     return this.store.fail(lease, error, agentRunId);
   }
 
+  /** Hand a claimed quest back to the queue without recording a failure. */
+  releaseClaim(lease: QuestLease): boolean {
+    this.release(lease.id);
+    return this.store.release(lease);
+  }
+
   /**
    * Run a claimed quest to a settled state: dispatch the work, then complete
    * or fail under the lease. The dispatch function receives a telemetry

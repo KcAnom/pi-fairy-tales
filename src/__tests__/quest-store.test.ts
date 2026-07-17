@@ -293,6 +293,26 @@ test("stores chain metadata and survives reopen", () => {
   } finally { rmSync(f.dir, { recursive: true, force: true }); }
 });
 
+test("release hands a claimed quest back without burning the retry budget", () => {
+  const f = fixture();
+  try {
+    const q = f.store.enqueue({ project: "/tmp/project", role: "build", task: "Not yet" }); // maxAttempts 1
+    const c1 = f.store.claimNext("/tmp/project", "s1")!;
+    assert.equal(f.store.release({ ...c1.lease, version: 99 }), false); // fenced
+    assert.equal(f.store.release(c1.lease), true);
+    const back = f.store.get(q.id)!;
+    assert.equal(back.state, "queued");
+    assert.equal(back.maxAttempts, 2); // release granted the attempt back
+    assert.equal(back.ownerSession, undefined);
+    // Re-claimable immediately, and a later real failure still terminates.
+    const c2 = f.store.claimNext("/tmp/project", "s2")!;
+    assert.equal(c2.quest.attempts, 2);
+    f.store.attachRun(c2.lease, "a1");
+    assert.equal(f.store.fail(c2.lease, "real failure", "a1"), true);
+    assert.equal(f.store.get(q.id)?.state, "failed");
+  } finally { f.close(); }
+});
+
 test("prune never evicts retained-unconsumed results", () => {
   const f = fixture({ maxHistory: 20 });
   try {

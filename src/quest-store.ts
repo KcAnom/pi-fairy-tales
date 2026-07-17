@@ -370,6 +370,28 @@ export class QuestStore {
     return { quest, lease: { id, ownerSession, version: quest.leaseVersion } };
   }
 
+  /** Voluntarily hand a claimed quest back to the queue without recording a
+   *  failure (e.g. a chain step claimed and then found it can't proceed yet).
+   *  The attempt doesn't count against the retry budget. Fenced by the lease. */
+  release(lease: QuestLease): boolean {
+    const now = Date.now();
+    return this.tx(() => {
+      const changed = Number(this.db.prepare(
+        `UPDATE quests SET state='queued', retry_at=NULL, owner_session=NULL, agent_run_id=NULL,
+                lease_expires_at=NULL, heartbeat_at=NULL, started_at=NULL, finished_at=NULL,
+                max_attempts=MAX(max_attempts, attempts + 1), updated_at=?
+         WHERE id=? AND state='running' AND owner_session=? AND lease_gen=?`,
+      ).run(now, lease.id, lease.ownerSession, lease.version).changes) > 0;
+      if (changed) {
+        this.db.prepare(
+          "UPDATE quest_runs SET finished_at=?, outcome='interrupted', error='released by owner' WHERE quest_id=? AND lease_gen=? AND finished_at IS NULL",
+        ).run(now, lease.id, lease.version);
+        this.event(lease.id, "released", { leaseVersion: lease.version });
+      }
+      return changed;
+    });
+  }
+
   /** Explicitly requeue a terminal (failed/cancelled) or interrupted quest,
    *  granting one more attempt if its retry budget is exhausted. */
   requeue(id: string, project: string): boolean {
