@@ -70,6 +70,14 @@ export interface FairyTalesConfig {
     path: string;
     maxHistory: number;
     autoResume: boolean;
+    /** Claim lease TTL without a heartbeat (ms). Default 120000. */
+    leaseTtlMs?: number;
+    /** Heartbeat interval while a quest runs (ms). Default leaseTtlMs/3. */
+    heartbeatMs?: number;
+    /** Default failure retry budget per quest. 1 = no retries (v1 behavior). */
+    maxAttempts?: number;
+    /** Base delay for exponential retry backoff (ms). */
+    backoffBaseMs?: number;
   };
   hooks: {
     bash: BashRule[];

@@ -4,6 +4,9 @@
 
 **New capability**
 - **Durable quest queue and journal** — the new `quest` tool and `/quests` command persist role-specialized work in a provider-neutral SQLite WAL database. Quests can be queued, atomically claimed, inspected, cancelled, recovered after graceful session interruption, and optionally auto-resumed. Session ownership and agent-run guards prevent concurrent or stale callbacks from corrupting results; `/doctor` verifies database integrity.
+- **Quest schema v2: leases and crash recovery** — every claim now issues a fencing lease (`QuestLease { id, ownerSession, version }`); write-backs carrying a stale lease version are rejected, so an expired worker can never overwrite a reclaimed quest. Running quests heartbeat via the new `QuestRuntime`; if a session dies, its leases expire and the work is reclaimable by any session (at-least-once). Existing v1 databases migrate transactionally in place.
+- **Quest scheduling metadata** — quests carry priority, a not-before time, bounded retry policy with exponential backoff (`maxAttempts`/`backoffBaseMs`, default 1 attempt = v1 behavior), dependencies (dependents never run early; terminally failed dependencies cascade), idempotent `dedupeKey`, chain metadata, and retain-until-consumed results that survive history pruning.
+- **Durable run telemetry** — each attempt records model, tier, turns, tokens, cost, and last activity in a `quest_runs` table that survives restarts; state transitions and their journal events commit atomically. New config: `quests.leaseTtlMs`, `quests.heartbeatMs`, `quests.maxAttempts`, `quests.backoffBaseMs`. `/doctor` reports running quests and expired leases.
 
 ## 0.14.0-dev — 2026-07-15
 

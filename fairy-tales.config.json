@@ -43,7 +43,11 @@
   "quests": {
     "path": "~/.pi/agent/fairy-tales-quests.sqlite",
     "maxHistory": 500,
-    "autoResume": false
+    "autoResume": false,
+    "leaseTtlMs": 120000,
+    "heartbeatMs": 30000,
+    "maxAttempts": 1,
+    "backoffBaseMs": 30000
   },
   "hooks": {
     "bash": [

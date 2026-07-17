@@ -121,13 +121,14 @@ export default function (pi: ExtensionAPI) {
 
       // Durable quest queue and journal.
       try {
-        const store = new QuestStore({ path: cfg.quests.path, maxHistory: cfg.quests.maxHistory });
+        const store = new QuestStore({ path: cfg.quests.path, maxHistory: cfg.quests.maxHistory, leaseTtlMs: cfg.quests.leaseTtlMs });
         const health = store.health();
         store.close();
+        const expired = health.expiredLeases > 0 ? ` · ${health.expiredLeases} expired lease${health.expiredLeases === 1 ? "" : "s"} (reclaimable)` : "";
         checks.push({
-          verdict: health.integrity === "ok" ? "ok" : "fail",
+          verdict: health.integrity !== "ok" ? "fail" : health.expiredLeases > 0 ? "warn" : "ok",
           label: "Quest journal",
-          detail: `${health.path} · integrity ${health.integrity} · ${health.queued} queued · ${health.interrupted} interrupted${cfg.quests.autoResume ? " · auto-resume ON" : ""}`,
+          detail: `${health.path} · integrity ${health.integrity} · ${health.queued} queued · ${health.running} running · ${health.interrupted} interrupted${expired}${cfg.quests.autoResume ? " · auto-resume ON" : ""}`,
         });
       } catch (err) {
         checks.push({ verdict: "fail", label: "Quest journal", detail: `unavailable — ${String(err)}` });

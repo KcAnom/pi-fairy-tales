@@ -29,6 +29,7 @@ import {
 import { bookOverlay } from "../src/overlay.ts";
 import { AgentRunner, shouldEscalate, type RunResult } from "../src/subagent/engine.ts";
 import { QuestStore, type QuestRecord } from "../src/quest-store.ts";
+import { QuestRuntime, type ClaimedQuest } from "../src/quest-runtime.ts";
 import { AGENTS_STATUS, COST_ADD, type CostAddPayload, type RunSummary } from "../src/bus.ts";
 import { fmtDuration, fmtUsd, fmtTokens, shortModelId } from "../src/text.ts";
 import { createSpendTracker } from "../src/spend.ts";
@@ -47,6 +48,7 @@ export default function (pi: ExtensionAPI) {
 
   let cfg: FairyTalesConfig | undefined;
   let questStore: QuestStore | undefined;
+  let questRuntime: QuestRuntime | undefined;
   let projectCwd = process.cwd();
   let sessionOwner = randomUUID();
   let shuttingDown = false;
@@ -80,7 +82,27 @@ export default function (pi: ExtensionAPI) {
 
   const roleLabel = (role: string) => FAE?.[role] ?? role;
 
-  const questLine = (q: QuestRecord) => `${q.id} · ${q.state} · ${q.role} · ${q.name} · attempts ${q.attempts}`;
+  const questLine = (q: QuestRecord) => {
+    const extras =
+      (q.priority ? ` · p${q.priority}` : "") +
+      (q.retryAt && q.state === "queued" ? ` · retry ${new Date(q.retryAt).toLocaleTimeString()}` : "") +
+      (q.dependsOn.length ? ` · after ${q.dependsOn.join(",")}` : "");
+    return `${q.id} · ${q.state} · ${q.role} · ${q.name} · attempts ${q.attempts}/${q.maxAttempts}${extras}`;
+  };
+
+  const openQuestStore = (cwd: string): void => {
+    const current = cfg ?? loadFairyTalesConfig(cwd);
+    try { questStore?.close(); } catch { /* stale reload */ }
+    questStore = new QuestStore({
+      path: current.quests.path,
+      maxHistory: current.quests.maxHistory,
+      leaseTtlMs: current.quests.leaseTtlMs,
+      maxAttempts: current.quests.maxAttempts,
+      backoffBaseMs: current.quests.backoffBaseMs,
+    });
+    questRuntime = new QuestRuntime({ store: questStore, ownerSession: sessionOwner, heartbeatMs: current.quests.heartbeatMs });
+    projectCwd = cwd;
+  };
 
   const updateQuestWidget = () => {
     if (!uiRef?.hasUI || !questStore) return;
@@ -91,8 +113,10 @@ export default function (pi: ExtensionAPI) {
     } catch { /* store may be closing during reload */ }
   };
 
-  const runClaimedQuest = async (quest: QuestRecord, ctx: any, background: boolean, signal?: AbortSignal): Promise<RunResult | { id: string }> => {
-    if (!questStore) throw new Error("Quest journal is not initialized");
+  const runClaimedQuest = async (claimed: ClaimedQuest, ctx: any, background: boolean, signal?: AbortSignal): Promise<RunResult | { id: string }> => {
+    const runtime = questRuntime;
+    if (!runtime) throw new Error("Quest journal is not initialized");
+    const { quest, lease } = claimed;
     let spawned;
     try {
       spawned = runner.spawn({
@@ -101,26 +125,44 @@ export default function (pi: ExtensionAPI) {
         fallbackModel: ctx.model, signal: background ? undefined : signal,
       });
     } catch (err) {
-      questStore.fail(quest.id, sessionOwner, `dispatch failed: ${String(err)}`);
+      runtime.fail(lease, `dispatch failed: ${String(err)}`);
       updateQuestWidget();
       throw err;
     }
-    if (!questStore.attachRun(quest.id, sessionOwner, spawned.id)) {
+    // If the lease expires (missed heartbeats) and another session reclaims the
+    // quest, abort our worker — its write-backs would be fenced out anyway.
+    runtime.setLeaseLostHandler(quest.id, () => void runner.abort(spawned.id));
+    if (!runtime.attachRun(lease, spawned.id)) {
       void runner.abort(spawned.id);
+      runtime.release(quest.id);
       throw new Error(`Quest ${quest.id} lost ownership before its agent started`);
     }
     updateQuestWidget();
+    const pushTelemetry = () => {
+      const s = runner.get(spawned.id)?.summary;
+      if (s) runtime.updateTelemetry(lease, { model: s.model, tier: s.tier, turns: s.turns, tokens: s.tokens, costUsd: s.costUsd, lastActivity: s.lastActivity });
+    };
+    pushTelemetry();
+    const telemetryTimer = setInterval(pushTelemetry, 15_000);
+    (telemetryTimer as { unref?: () => void }).unref?.();
+    // Settle exactly once: telemetry flush happens before the terminal write
+    // because complete/fail invalidate the lease that fences updateTelemetry.
+    const settle = (result?: RunResult, err?: unknown) => {
+      clearInterval(telemetryTimer);
+      pushTelemetry();
+      if (result && result.summary.state === "done") runtime.complete(lease, spawned.id, result.text);
+      else if (!shuttingDown) runtime.fail(lease, result ? result.text : String(err), spawned.id);
+      else runtime.release(quest.id); // shutdown path: recoverOwned marks it interrupted
+      updateQuestWidget();
+    };
     if (background) {
       spawned.promise.then((result) => {
-        if (result.summary.state === "done") questStore?.complete(quest.id, sessionOwner, spawned.id, result.text);
-        else if (!shuttingDown) questStore?.fail(quest.id, sessionOwner, result.text, spawned.id);
-        updateQuestWidget();
+        settle(result);
         try {
           pi.sendMessage({ customType: "fairy-tales-quest-result", content: `Quest ${quest.id} “${quest.name}” completed:\n\n${result.text}`, display: true }, { deliverAs: "steer", triggerTurn: true });
         } catch { /* session changed */ }
       }).catch((err) => {
-        if (!shuttingDown) questStore?.fail(quest.id, sessionOwner, String(err), spawned.id);
-        updateQuestWidget();
+        settle(undefined, err);
         try {
           pi.sendMessage({ customType: "fairy-tales-quest-result", content: `Quest ${quest.id} “${quest.name}” failed: ${String(err)}`, display: true }, { deliverAs: "steer", triggerTurn: true });
         } catch { /* session changed */ }
@@ -129,13 +171,10 @@ export default function (pi: ExtensionAPI) {
     }
     try {
       const result = await spawned.promise;
-      if (result.summary.state === "done") questStore.complete(quest.id, sessionOwner, spawned.id, result.text);
-      else if (!shuttingDown) questStore.fail(quest.id, sessionOwner, result.text, spawned.id);
-      updateQuestWidget();
+      settle(result);
       return result;
     } catch (err) {
-      if (!shuttingDown) questStore.fail(quest.id, sessionOwner, String(err), spawned.id);
-      updateQuestWidget();
+      settle(undefined, err);
       throw err;
     }
   };
@@ -162,13 +201,13 @@ export default function (pi: ExtensionAPI) {
     shuttingDown = false;
     uiRef = ctx;
     spend.reset();
-    try { questStore?.close(); } catch { /* stale reload */ }
-    questStore = new QuestStore({ path: cfg.quests.path, maxHistory: cfg.quests.maxHistory });
+    openQuestStore(ctx.cwd);
+    try { questStore?.reclaimExpired(ctx.cwd); } catch { /* visibility only */ }
     updateQuestWidget();
     if (cfg.quests.autoResume) {
-      const next = questStore.claimNext(ctx.cwd, sessionOwner);
+      const next = questRuntime?.claimNext(ctx.cwd);
       if (next) void runClaimedQuest(next, ctx, true).catch((err) => {
-        if (ctx.hasUI) ctx.ui.notify(`Auto-resume failed for ${next.id}: ${String(err)}`, "error");
+        if (ctx.hasUI) ctx.ui.notify(`Auto-resume failed for ${next.quest.id}: ${String(err)}`, "error");
       });
     }
     // Orchestrated mode: the session model IS the conductor — align it.
@@ -199,8 +238,9 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", async () => {
     shuttingDown = true;
     await runner.abortAll();
-    try { questStore?.recoverOwned(projectCwd, sessionOwner); } catch { /* best effort */ }
+    try { questRuntime?.shutdown(projectCwd); } catch { /* best effort */ }
     try { questStore?.close(); } catch { /* already closed */ }
+    questRuntime = undefined;
     questStore = undefined;
   });
 
@@ -379,55 +419,65 @@ export default function (pi: ExtensionAPI) {
       name: Type.Optional(Type.String({ description: "Short quest name" })),
       id: Type.Optional(Type.String({ description: "Quest id for get/events/cancel" })),
       background: Type.Optional(Type.Boolean({ description: "For run: return immediately and deliver the result later (default true)" })),
+      priority: Type.Optional(Type.Integer({ description: "For enqueue: higher runs first (default 0)" })),
+      dependsOn: Type.Optional(Type.Array(Type.String(), { description: "For enqueue: quest ids that must complete first" })),
+      maxAttempts: Type.Optional(Type.Integer({ description: "For enqueue: failure retry budget (default from config; 1 = no retries)" })),
+      notBefore: Type.Optional(Type.String({ description: "For enqueue: ISO timestamp before which the quest must not run" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       cfg = loadFairyTalesConfig(ctx.cwd);
-      if (!questStore) {
-        questStore = new QuestStore({ path: cfg.quests.path, maxHistory: cfg.quests.maxHistory });
-        projectCwd = ctx.cwd;
-      }
+      if (!questStore || !questRuntime) openQuestStore(ctx.cwd);
       if (params.action === "enqueue") {
         if (!params.role || !params.task) throw new Error("quest enqueue requires role and task");
-        const q = questStore.enqueue({ project: ctx.cwd, role: params.role, task: params.task, context: params.context, name: params.name });
+        const scheduledAt = params.notBefore ? Date.parse(params.notBefore) : undefined;
+        if (params.notBefore && Number.isNaN(scheduledAt)) throw new Error(`quest enqueue: cannot parse notBefore "${params.notBefore}"`);
+        const q = questStore!.enqueue({
+          project: ctx.cwd, role: params.role, task: params.task, context: params.context, name: params.name,
+          priority: params.priority, dependsOn: params.dependsOn, maxAttempts: params.maxAttempts, scheduledAt,
+        });
         updateQuestWidget();
         return { content: [{ type: "text", text: `Queued ${questLine(q)}\nRun it with quest action='run'.` }], details: { quest: q } };
       }
       if (params.action === "run") {
-        const q = questStore.claimNext(ctx.cwd, sessionOwner);
-        if (!q) return { content: [{ type: "text", text: "No queued or interrupted quests for this project." }] };
+        const claimed = questRuntime!.claimNext(ctx.cwd);
+        if (!claimed) return { content: [{ type: "text", text: "No claimable quests for this project (queued work may be scheduled later, waiting on retry backoff, or blocked on dependencies)." }] };
         const background = params.background !== false;
-        const outcome = await runClaimedQuest(q, ctx, background, _signal);
+        const outcome = await runClaimedQuest(claimed, ctx, background, _signal);
         const text = background
-          ? `Started ${q.id} “${q.name}” as background agent ${(outcome as { id: string }).id}.`
+          ? `Started ${claimed.quest.id} “${claimed.quest.name}” as background agent ${(outcome as { id: string }).id}.`
           : (outcome as RunResult).text;
-        return { content: [{ type: "text", text }], details: { quest: questStore.get(q.id), background } };
+        return { content: [{ type: "text", text }], details: { quest: questStore!.get(claimed.quest.id), background } };
       }
       if (params.action === "list") {
-        const rows = questStore.list(ctx.cwd);
+        const rows = questStore!.list(ctx.cwd);
         return { content: [{ type: "text", text: rows.length ? rows.map(questLine).join("\n") : "No quests for this project." }], details: { quests: rows } };
       }
       if (!params.id) throw new Error(`quest ${params.action} requires id`);
       if (params.action === "cancel") {
-        const cancelled = questStore.cancel(params.id, ctx.cwd);
+        const cancelled = questStore!.cancel(params.id, ctx.cwd);
         updateQuestWidget();
         return { content: [{ type: "text", text: cancelled ? `Cancelled ${params.id}.` : `${params.id} is not queued/interrupted or does not exist.` }] };
       }
-      const q = questStore.get(params.id);
+      const q = questStore!.get(params.id);
       if (!q || q.project !== resolve(ctx.cwd)) return { content: [{ type: "text", text: `Unknown quest ${params.id} in this project.` }] };
       if (params.action === "events") {
-        const events = questStore.events(params.id);
+        const events = questStore!.events(params.id);
         return { content: [{ type: "text", text: events.map((e) => `${new Date(e.at).toISOString()} · ${e.event} · ${JSON.stringify(e.data)}`).join("\n") || "No events." }], details: { quest: q, events } };
       }
-      return { content: [{ type: "text", text: `${questLine(q)}\n\n${q.result ?? q.error ?? q.task}` }], details: { quest: q } };
+      const lastRun = questStore!.runs(params.id, 1)[0];
+      const telemetry = lastRun
+        ? `\n\nLast attempt: #${lastRun.attempt} · ${lastRun.outcome ?? "running"} · ${shortModelId(lastRun.model ?? "?")} · t${lastRun.turns} · ${fmtTokens(lastRun.tokens)} tok · ${fmtUsd(lastRun.costUsd)}`
+        : "";
+      return { content: [{ type: "text", text: `${questLine(q)}${telemetry}\n\n${q.result ?? q.error ?? q.task}` }], details: { quest: q, lastRun } };
     },
   });
 
   pi.registerCommand("quests", {
     description: "Show the durable quest queue and journal for this project",
     handler: async (_args, ctx) => {
-      const current = loadFairyTalesConfig(ctx.cwd);
-      if (!questStore) questStore = new QuestStore({ path: current.quests.path, maxHistory: current.quests.maxHistory });
-      const rows = questStore.list(ctx.cwd);
+      cfg = loadFairyTalesConfig(ctx.cwd);
+      if (!questStore || !questRuntime) openQuestStore(ctx.cwd);
+      const rows = questStore!.list(ctx.cwd);
       if (ctx.hasUI) ctx.ui.notify(rows.length ? rows.map(questLine).slice(0, 8).join("\n") : "No quests for this project.", "info");
     },
   });
