@@ -79,6 +79,7 @@ If a tier model is ever unavailable, subagents fall back to your session model w
 |---|---|
 | `agent` tool | Delegate to role-specialized subagents: **explore**, **plan**, **build**, **review**, **general** (config-driven — add your own). Multiple calls in one message run in parallel; overflow **queues** instead of failing. Each returns a structured result envelope; `background: true` runs detached. Turn / cost / concurrency caps enforced, with token-based cost estimation on subscription models and transient-error retry. |
 | `agent_control` + `/agents` | `list` / `result` / `abort`, plus `continue` (send a follow-up to a just-finished agent, reusing its context) and `transcript` (path to a run's full log). Live widget while agents run. |
+| `quest` + `/quests` | Durable SQLite-backed agent queue and lifecycle journal. Queue role-specialized work, claim it later, inspect events/results, cancel pending work, and recover interrupted runs. Records are project-scoped and provider-neutral. |
 | `/loadout` | Named model lineups: `save`/`use`/`delete <name>`, bare `/loadout` for a picker. Swaps mode, tiers, role assignments, and the session model in one command. |
 | `/agent-models` | Read-only roster of the current setup: mode, each tier's model with live availability, every role's **effective** model (including what broken tiers actually fall back to), compaction tier, and caps. |
 | `/agent-model` | Switch subagent model strategy: **orchestrated** (strong conductor leads — session + plan/review + failure escalation — while cheap tiers execute), **tiered** (per-role), or **single**. Persists to `~/.pi/agent/fairy-tales.json`. |
@@ -109,6 +110,7 @@ If a tier model is ever unavailable, subagents fall back to your session model w
 Defaults ship in [`fairy-tales.config.json`](fairy-tales.config.json). Override globally in `~/.pi/agent/fairy-tales.json` or per project in `<project>/.pi/fairy-tales.json` (deep-merged, project wins). Key sections:
 
 - `tiers` — model per tier (`provider/model-id` + thinkingLevel). Out of the box subagents follow your session model; switch to tiered via `/agent-model` or by setting real models here plus `"modelMode": "tiered"`.
+- `quests` — SQLite journal `path`, terminal-record `maxHistory`, and optional `autoResume`. Default: `~/.pi/agent/fairy-tales-quests.sqlite`.
 - `agents` — `maxConcurrent`, `maxTurnsPerRun`, `maxCostPerRunUsd`, `modelMode` (`"tiered"` | `"single"`), `singleModel` (`"session"` or a `provider/model-id`), and role definitions (tier, tool allowlist, description, `promptAppend`).
 - `ultraplan` — `planners` (>1 adds a synthesis pass), `worktree`, `autoExecute`, `planRole`, `buildRole`.
 - `hooks.bash` / `hooks.paths` — guard-rail rules (regex / glob, `block` or `confirm`); `bashAppend` / `pathsAppend` add without replacing the shipped defaults.

@@ -84,6 +84,22 @@ Shipped roles: `explore` (read-only scout), `plan` (architect, read-only), `buil
 
 Approved plan-mode plans are saved here as `<date>-<slug>.md`.
 
+## `quests`
+
+```json
+"quests": {
+  "path": "~/.pi/agent/fairy-tales-quests.sqlite",
+  "maxHistory": 500,
+  "autoResume": false
+}
+```
+
+- `path` — SQLite database used by the durable `quest` tool. Records are scoped by absolute project path and contain no provider credentials.
+- `maxHistory` — terminal records retained; active records are never pruned.
+- `autoResume` — automatically dispatch the oldest queued or interrupted quest at startup.
+
+The journal uses SQLite WAL mode and atomic claims. `/quests` shows the project queue; `/doctor` checks database integrity.
+
 ## `hooks`
 
 ```json
@@ -156,7 +172,7 @@ Set `FAIRY_TALES_DEBUG=1` to log internal diagnostics (swallowed errors, config 
 
 ## Command / tool inventory
 
-**Tools (model-invoked):** `agent`, `agent_control`, `todo`, `remember`, `fetch`, `exit_plan`
-**Commands:** `/plan`, `/ultraplan`, `/agents`, `/agent-model`, `/memory`, `/grimoire`, `/checkpoints`, `/rollback`, `/tale` (ftales only)
+**Tools (model-invoked):** `agent`, `agent_control`, `quest`, `todo`, `remember`, `fetch`, `exit_plan`
+**Commands:** `/plan`, `/ultraplan`, `/agents`, `/quests`, `/agent-model`, `/memory`, `/grimoire`, `/checkpoints`, `/rollback`, `/tale` (ftales only)
 **Prompts:** `/commit`, `/review`, `/plan-task`, `/standup`
 **Skills:** `deep-review`, `handoff`, `ship`

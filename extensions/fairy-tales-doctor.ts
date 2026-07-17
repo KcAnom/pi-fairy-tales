@@ -17,6 +17,7 @@ import {
   resolveTierModel,
 } from "../src/config.ts";
 import { bookOverlay } from "../src/overlay.ts";
+import { QuestStore } from "../src/quest-store.ts";
 
 type Verdict = "ok" | "warn" | "fail";
 
@@ -116,6 +117,20 @@ export default function (pi: ExtensionAPI) {
         });
       } catch {
         checks.push({ verdict: "fail", label: "Memory", detail: `${memDir} missing or not writable — remember/recall won't persist` });
+      }
+
+      // Durable quest queue and journal.
+      try {
+        const store = new QuestStore({ path: cfg.quests.path, maxHistory: cfg.quests.maxHistory });
+        const health = store.health();
+        store.close();
+        checks.push({
+          verdict: health.integrity === "ok" ? "ok" : "fail",
+          label: "Quest journal",
+          detail: `${health.path} · integrity ${health.integrity} · ${health.queued} queued · ${health.interrupted} interrupted${cfg.quests.autoResume ? " · auto-resume ON" : ""}`,
+        });
+      } catch (err) {
+        checks.push({ verdict: "fail", label: "Quest journal", detail: `unavailable — ${String(err)}` });
       }
 
       // Post-edit test hook (opt-in per project).

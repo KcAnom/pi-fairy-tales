@@ -65,6 +65,12 @@ export interface FairyTalesConfig {
   };
   memory: { dir: string; injectIndex: boolean };
   plans: { dir: string };
+  /** Durable provider-neutral agent work queue and event journal. */
+  quests: {
+    path: string;
+    maxHistory: number;
+    autoResume: boolean;
+  };
   hooks: {
     bash: BashRule[];
     paths: PathRule[];

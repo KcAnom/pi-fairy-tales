@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+**New capability**
+- **Durable quest queue and journal** — the new `quest` tool and `/quests` command persist role-specialized work in a provider-neutral SQLite WAL database. Quests can be queued, atomically claimed, inspected, cancelled, recovered after graceful session interruption, and optionally auto-resumed. Session ownership and agent-run guards prevent concurrent or stale callbacks from corrupting results; `/doctor` verifies database integrity.
+
 ## 0.14.0-dev — 2026-07-15
 
 A refinement pass: correctness fixes for the engine, security hardening, TUI state-leak fixes, branding separation, new capabilities, and a test suite.
