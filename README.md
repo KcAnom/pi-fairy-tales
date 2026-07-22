@@ -8,7 +8,7 @@ Subagent orchestration · isolated-worktree planning · guard-rail hooks · pers
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-gold.svg)](LICENSE)
 [![Built for pi](https://img.shields.io/badge/built%20for-pi%20coding%20agent-8a5cf6.svg)](https://github.com/earendil-works/pi-mono)
-[![Version](https://img.shields.io/badge/version-0.14.0--dev-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.15.0-blue.svg)](CHANGELOG.md)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 </div>
@@ -52,7 +52,7 @@ mkdir -p ~/bin && printf '#!/bin/sh\nexport FTALES=1\nexec pi "$@"\n' > ~/bin/ft
 
 For local development: clone anywhere and `pi install /path/to/pi-fairy-tales` — local packages load in place, so edit + `/reload` inside pi picks up changes. Remove with `pi remove <source>`.
 
-**Docs:** [Setup Guide](docs/SETUP.md) · [Configuration Reference](docs/CONFIGURATION.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Changelog](CHANGELOG.md) · [AGENTS.md](AGENTS.md)
+**Docs:** [Setup Guide](docs/SETUP.md) · [Configuration Reference](docs/CONFIGURATION.md) · [Ecosystem Map](docs/ECOSYSTEM.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Changelog](CHANGELOG.md) · [AGENTS.md](AGENTS.md)
 
 ## Bring your own models
 
@@ -110,7 +110,9 @@ If a tier model is ever unavailable, subagents fall back to your session model w
 Defaults ship in [`fairy-tales.config.json`](fairy-tales.config.json). Override globally in `~/.pi/agent/fairy-tales.json` or per project in `<project>/.pi/fairy-tales.json` (deep-merged, project wins). Key sections:
 
 - `tiers` — model per tier (`provider/model-id` + thinkingLevel). Out of the box subagents follow your session model; switch to tiered via `/agent-model` or by setting real models here plus `"modelMode": "tiered"`.
-- `quests` — SQLite journal `path`, terminal-record `maxHistory`, and optional `autoResume`. Default: `~/.pi/agent/fairy-tales-quests.sqlite`.
+- `quests` — SQLite journal `path`, terminal-record `maxHistory`, optional `autoResume`, plus durability knobs `leaseTtlMs`, `heartbeatMs`, `maxAttempts`, `backoffBaseMs`. Default: `~/.pi/agent/fairy-tales-quests.sqlite`.
+- `scheduler` — background quest runner (`enabled`, `pollMs`, `maxConcurrent`). Off by default.
+- `codeIntel` — codebase index behind the `codebase_intel` tool (`enabled`). Cache lives in `~/.pi/agent/cache/code-intelligence/`.
 - `agents` — `maxConcurrent`, `maxTurnsPerRun`, `maxCostPerRunUsd`, `modelMode` (`"tiered"` | `"single"`), `singleModel` (`"session"` or a `provider/model-id`), and role definitions (tier, tool allowlist, description, `promptAppend`).
 - `ultraplan` — `planners` (>1 adds a synthesis pass), `worktree`, `autoExecute`, `planRole`, `buildRole`.
 - `hooks.bash` / `hooks.paths` — guard-rail rules (regex / glob, `block` or `confirm`); `bashAppend` / `pathsAppend` add without replacing the shipped defaults.

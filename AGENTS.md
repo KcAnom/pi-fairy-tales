@@ -29,7 +29,7 @@ Follow [docs/SETUP.md](docs/SETUP.md) top to bottom — every step is idempotent
 
 ## Testing changes
 
-No unit test suite — verification is behavioral, against the real pi:
+Unit tests live in `src/__tests__/` (`npm test` runs vitest). They cover the library layer (`src/`); extension behavior is verified behaviorally, against the real pi:
 
 - Headless: `pi -e /path/to/this/repo -p "prompt exercising the feature"` from a scratch directory.
 - Full TUI: run in a pty and reconstruct the screen (`script -q log ftales`, then parse with a terminal emulator like pyte) — grep-ing raw logs is unreliable because of cursor-positioned writes.
